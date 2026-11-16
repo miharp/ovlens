@@ -37,7 +37,7 @@ same package serves OpenVox 8 and 9. Installing it downloads nothing more. On
 a server without internet access, copy the package over and install the file:
 
 ```shell
-sudo dnf install ./ovlens_0.1.0_linux_noarch.rpm
+sudo dnf install ./ovlens_0.1.1_linux_noarch.rpm
 ```
 
 The command is `/usr/bin/ovlens`. The
@@ -58,9 +58,8 @@ It needs Ruby 3.2 or later. OpenVox is deliberately not a gem dependency:
 `ovlens mcp` does not need it, and `ovlens generate` does, so add the `openvox`
 gem if you generate on a workstation.
 
-There is no release yet. Until the first one, build from a checkout: the gem
-with `gem build ovlens.gemspec`, the packages with `script/release-assets` and
-`script/package`.
+To build from a checkout instead: the gem with `gem build ovlens.gemspec`, the
+packages with `script/release-assets` and `script/package`.
 
 ## Generate
 
@@ -131,11 +130,20 @@ subprocess and talks to it over stdio.
 | --- | --- |
 | `list_modules` | Which modules and versions are deployed, and when the docs were generated |
 | `search_code` | Which classes, defined types, functions, types, tasks or plans match some words |
-| `get_docs` | One entity's description, parameters with types and defaults, examples, file and line |
+| `get_docs` | The description, parameters with types and defaults, examples, file and line of one or more entities |
 
 `search_code` looks at names, summaries and the full documentation text, and
 hides entities marked `@api private` unless asked. Every tool takes an optional
 `environment`, which defaults to `production`.
+
+`get_docs` takes several names in one call. A reply is kept to a size an MCP
+client will pass on: an entity too large for it, such as a resource type with a
+hundred properties, comes back shortened, with every parameter still listed,
+and `parameters` then returns chosen ones in full.
+
+Only the modules on an environment's module path are documented. Puppet's
+built-in types and functions (`file`, `package`, `service`, `cron` and so on)
+are not, and the server tells the assistant so.
 
 For Claude Code, add this to `.mcp.json` in the project you work in:
 
@@ -168,6 +176,10 @@ bundle exec rake    # rubocop and rspec
 The specs in `spec/integration` run the real command with OpenVox and
 openvox-strings.
 
+Develop on Ruby 3.2, the oldest supported, as `.ruby-version` says. The
+lockfile has to resolve for it, and `bundle install` on a newer Ruby adds gem
+variants that 3.2 cannot install.
+
 `Gemfile.lock` is committed and pins what ships: the packages and the gem
 index are built from it, at the versions CI tested. Dependabot proposes
 updates weekly. A merged update reaches servers only with the next release.
@@ -178,20 +190,21 @@ them up from there within the hour.
 
 ## Status
 
-Tested from locally built packages, with every package repository disabled for
-the install:
+The packages were tested with every package repository disabled for the
+install: the rpm on AlmaLinux 9 with openvox-agent 8.33.0 (Ruby 3.2), and the
+deb on Ubuntu 24.04 with openvox-agent 9.4.0 (Ruby 4.0) with no locale set, as
+under systemd.
 
-- the rpm on AlmaLinux 9 with openvox-agent 8.33.0 (Ruby 3.2)
-- the deb on Ubuntu 24.04 with openvox-agent 9.4.0 (Ruby 4.0), with no locale
-  set, as under systemd
+With the [Puppet module](https://github.com/miharp/puppet-ovlens), 0.1.0 was
+applied on 2026-11-16 to an OpenVox 9 server (AlmaLinux 10): the timer's
+service documented 7 environments of 24 to 35 modules each in 4 seconds of
+CPU, a second run left them unchanged in about a second, and the MCP server
+answered over SSH in about 150 ms per call.
 
-Both ran `ovlens generate`, including the reuse of unchanged modules, and
-`ovlens mcp`.
+An assistant with only these tools answered questions about a 24-module
+environment correctly, including writing resources with the parameter names
+of the module versions deployed there. 0.1.1 fixes what that trial showed:
+one call per entity, a resource type too large for one reply, and no word
+that built-in types are not covered.
 
-An earlier script version of the generator was tested on 2026-11-16 on a
-package-installed OpenVox 9 server (AlmaLinux 10, r10k 5.0.3): 7 environments
-of 24 to 35 modules each in 18 seconds, as an r10k `postrun`, with the MCP
-server started over SSH.
-
-Not yet released, not yet tried from an assistant, and the release workflow
-has not run on GitHub.
+Not tested on a package-installed OpenVox 8 server.

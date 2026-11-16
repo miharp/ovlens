@@ -63,6 +63,64 @@ RSpec.describe Ovlens::McpServer do
     expect(data['results'].map { |r| r['docs']['type_name'] }).to eq(['file_line'])
   end
 
+  it 'reads several names in one call, and says which it could not find' do
+    data, error = call('get_docs', { names: ['nginx', 'systemd::escape', 'nginx::nope'] })
+    expect(error).to be(false)
+    expect(data['results'].map { |r| r['docs']['name'] }).to eq(%w[nginx systemd::escape])
+    expect(data['not_found'].map { |n| n['name'] }).to eq(['nginx::nope'])
+  end
+
+  it 'fails when none of several names exist, and when no name is given' do
+    data, error = call('get_docs', { names: %w[nope nada] })
+    expect(error).to be(true)
+    expect(data['not_found'].size).to eq(2)
+    text, error = call('get_docs', {})
+    expect([text, error]).to eq(['Give at least one entity name in `names`.', true])
+  end
+
+  context 'with resource types too big for one reply' do
+    let(:long) { "What it does.\n\n#{'More detail. ' * 30}" }
+    let(:big) do
+      properties = (1..150).map { |n| { 'name' => "prop#{n}", 'description' => long, 'data_type' => 'String' } }
+      %w[fw1 fw2 fw3 fw4 fw5 fw6 fw7].to_h { |name| [name, { 'resource_types' => [entity(name, long, properties: properties)] }] }
+    end
+
+    before { write_docs(tmp, 'production', big) }
+
+    it 'shortens one and says how to read the rest' do
+      data, = call('get_docs', { name: 'fw1' })
+      result = data['results'].first
+      expect(result['detail']).to eq('condensed')
+      expect(result['docs']['properties'].size).to eq(150)
+      expect(result['docs']['properties'].first['description']).to eq('What it does.')
+      expect(data['hint']).to include('`parameters`')
+      expect(JSON.generate(data).size).to be < 45_000
+    end
+
+    it 'returns chosen properties in full' do
+      data, = call('get_docs', { name: 'fw1', parameters: %w[prop7 nope] })
+      result = data['results'].first
+      expect(result['docs']['properties']).to eq([{ 'name' => 'prop7', 'description' => long, 'data_type' => 'String' }])
+      expect(result['unknown_parameters']).to eq(['nope'])
+      expect(result).not_to have_key('detail')
+    end
+
+    it 'keeps a reply for many of them within its budget and names what was left out' do
+      data, = call('get_docs', { names: big.keys })
+      expect(JSON.generate(data).size).to be < 45_000
+      expect(data['results'].map { |r| r['detail'] }.uniq - %w[condensed outline]).to be_empty
+      expect(data['results'].size + data['omitted'].size).to eq(7)
+      expect(data['omitted']).not_to be_empty
+      expect(data['hint']).to include('omitted')
+    end
+  end
+
+  it 'says in its instructions that built-in types are not covered' do
+    request = { jsonrpc: '2.0', id: 1, method: 'initialize',
+                params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'spec', version: '0' } } }
+    expect(server.handle(request)[:result][:instructions]).to include('built-in types', 'several names')
+  end
+
   it 'suggests names when nothing matches' do
     data, error = call('get_docs', { name: 'nginx::resource::servr' })
     expect(error).to be(true)
