@@ -1,0 +1,25 @@
+---
+# Gemfile.lock pins what the rpm, the deb and the gem index ship, so a merged
+# update here changes the next release. Nothing reaches a server until a
+# release is tagged.
+version: 2
+updates:
+  - package-ecosystem: bundler
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      # The gems that ship inside the packages.
+      runtime:
+        dependency-type: production
+      # Test and lint tooling.
+      development:
+        dependency-type: development
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']

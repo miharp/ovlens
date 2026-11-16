@@ -1,0 +1,22 @@
+#!/opt/puppetlabs/puppet/bin/ruby
+# frozen_string_literal: true
+
+# The packaged `ovlens` command. It runs ovlens from the gems the package ships
+# under /opt/ovlens, with the OpenVox agent's Ruby.
+#
+# The agent's whole gem path stays behind them: OpenVox's own dependencies
+# live in a vendor directory the agent adds to that path, not in the default
+# gem directory.
+vendor = '/opt/ovlens/gems'
+ENV['GEM_PATH'] = [vendor, *Gem.path].join(File::PATH_SEPARATOR)
+Gem.clear_paths
+
+# Use exactly the versions the package ships, even when another copy of one of
+# these gems has been installed into the agent's Ruby.
+Dir[File.join(vendor, 'specifications', '*.gemspec')].each do |file|
+  spec = Gem::Specification.load(file)
+  gem spec.name, "= #{spec.version}"
+end
+
+require 'ovlens/cli'
+exit Ovlens::CLI.run(ARGV)

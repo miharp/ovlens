@@ -7,6 +7,8 @@ AllCops:
   SuggestExtensions: false
   Exclude:
     - 'vendor/**/*'
+    - 'build/**/*'
+    - 'dist/**/*'
 
 Layout/LineLength:
   Max: 140

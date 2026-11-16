@@ -1,0 +1,40 @@
+---
+# The rpm and deb, built by script/package. One noarch package serves every
+# OpenVox agent: the gems under /opt/ovlens are pure Ruby.
+name: ovlens
+arch: all
+platform: linux
+version: ${VERSION}
+vendor: Michael Harp
+homepage: https://github.com/miharp/ovlens
+maintainer: Michael Harp <mike@mikeharp.com>
+license: Apache-2.0
+description: |-
+  Documentation for the Puppet code deployed in OpenVox environments.
+
+  Runs openvox-strings over every module in an environment and serves the
+  result to AI assistants through a read-only MCP server.
+
+# The command runs with the agent's Ruby, which also provides OpenVox itself.
+depends:
+  - openvox-agent
+
+contents:
+  # ovlens and its dependency gems, at the versions Gemfile.lock pins. Not in
+  # the agent's own gem directory: that path carries the Ruby version, and
+  # `gem` manages it.
+  - src: build/stage/opt/ovlens/gems/
+    dst: /opt/ovlens/gems/
+    type: tree
+
+  # /usr/bin, not /opt/puppetlabs/bin: that directory belongs to the
+  # openvox-agent package.
+  - src: packaging/ovlens
+    dst: /usr/bin/ovlens
+    file_info:
+      mode: 0755
+
+  - src: LICENSE
+    dst: /usr/share/doc/ovlens/LICENSE
+  - src: README.md
+    dst: /usr/share/doc/ovlens/README.md

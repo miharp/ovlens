@@ -13,30 +13,54 @@ take" or "which module provides `ensure_packages`" from what is really deployed.
 
 ## Install
 
-ovlens is not published on RubyGems. Releases go to the
-[harpworks repository](https://packages.harpworks.org), which carries ovlens
-and its dependencies, so `--clear-sources` installs from there alone:
+### On an OpenVox server
+
+Install the rpm or deb from the
+[harpworks repository](https://packages.harpworks.org):
+
+```shell
+# RPM: RHEL, AlmaLinux, Rocky, CentOS Stream
+sudo curl -fsSL https://packages.harpworks.org/rpm/harpworks.repo -o /etc/yum.repos.d/harpworks.repo
+sudo dnf install ovlens
+```
+
+```shell
+# DEB: Debian, Ubuntu
+sudo curl -fsSL https://packages.harpworks.org/harpworks.asc -o /etc/apt/keyrings/harpworks.asc
+echo "deb [signed-by=/etc/apt/keyrings/harpworks.asc] https://packages.harpworks.org/deb stable main" | sudo tee /etc/apt/sources.list.d/harpworks.list
+sudo apt-get update && sudo apt-get install ovlens
+```
+
+The package carries its gems under `/opt/ovlens` and runs them with the
+OpenVox agent's Ruby, so it needs `openvox-agent` and nothing else, and the
+same package serves OpenVox 8 and 9. Installing it downloads nothing more. On
+a server without internet access, copy the package over and install the file:
+
+```shell
+sudo dnf install ./ovlens_0.1.0_linux_noarch.rpm
+```
+
+The command is `/usr/bin/ovlens`. The
+[ovlens Puppet module](https://github.com/miharp/puppet-ovlens) installs the
+package and sets up regular generation.
+
+### On a workstation
+
+To run `ovlens mcp` on your own machine, install the gem. It is not published
+on RubyGems; the harpworks repository carries it and its dependencies, so
+`--clear-sources` installs from there alone:
 
 ```shell
 gem install --clear-sources --source https://packages.harpworks.org/gems ovlens
 ```
 
-It needs Ruby 3.2 or later. On an OpenVox server, install it into the agent's
-Ruby, which already has OpenVox:
+It needs Ruby 3.2 or later. OpenVox is deliberately not a gem dependency:
+`ovlens mcp` does not need it, and `ovlens generate` does, so add the `openvox`
+gem if you generate on a workstation.
 
-```shell
-sudo /opt/puppetlabs/puppet/bin/gem install --clear-sources --source https://packages.harpworks.org/gems ovlens
-```
-
-The command is then `/opt/puppetlabs/puppet/bin/ovlens`. The
-[ovlens Puppet module](https://github.com/miharp/puppet-ovlens) does this and
-sets up regular generation.
-
-OpenVox is deliberately not a gem dependency. `ovlens mcp` does not need it;
-`ovlens generate` does, so on a workstation install the `openvox` gem as well.
-
-There is no release yet. Until the first one, build the gem from a checkout
-with `gem build ovlens.gemspec` and install the file.
+There is no release yet. Until the first one, build from a checkout: the gem
+with `gem build ovlens.gemspec`, the packages with `script/release-assets` and
+`script/package`.
 
 ## Generate
 
@@ -68,7 +92,7 @@ written. A module OpenVox itself cannot load, for example one with a broken
 r10k replaces `$modifiedenvs` with the environments it just deployed:
 
 ```yaml
-postrun: ['/opt/puppetlabs/puppet/bin/ovlens', 'generate', '$modifiedenvs']
+postrun: ['/usr/bin/ovlens', 'generate', '$modifiedenvs']
 ```
 
 ### Output
@@ -132,7 +156,7 @@ Two ways to use it:
   `r10k puppetfile install`, and point the server at the output.
 - **Against a server.** Generate on the OpenVox server and start the MCP server
   there over SSH: `"command": "ssh", "args": ["openvox.example.com",
-  "/opt/puppetlabs/puppet/bin/ovlens", "mcp"]`. Nothing listens on the network.
+  "/usr/bin/ovlens", "mcp"]`. Nothing listens on the network.
 
 ## Development
 
@@ -144,21 +168,30 @@ bundle exec rake    # rubocop and rspec
 The specs in `spec/integration` run the real command with OpenVox and
 openvox-strings.
 
-A `v*` tag releases: the workflow runs the checks, builds the gem, and attaches
-it and its dependency gems to a GitHub Release. The harpworks repository picks
+`Gemfile.lock` is committed and pins what ships: the packages and the gem
+index are built from it, at the versions CI tested. Dependabot proposes
+updates weekly. A merged update reaches servers only with the next release.
+
+A `v*` tag releases: the workflow runs the checks, builds the gems, the rpm and
+the deb, and attaches them to a GitHub Release. The harpworks repository picks
 them up from there within the hour.
 
 ## Status
 
-The gem installs and runs in the OpenVox server 8 container (openvox 8.32.0,
-Ruby 3.3) and from a checkout on macOS (Ruby 3.4).
+Tested from locally built packages, with every package repository disabled for
+the install:
 
-An earlier script version of the same code was tested on 2026-11-16 on a
-package-installed OpenVox 9 server (AlmaLinux 10, openvox-agent 9.3.0 with its
-bundled Ruby 4.0.9, r10k 5.0.3): 7 environments of 24 to 35 modules each in 18
-seconds, as an r10k `postrun`, with the MCP server started over SSH. The gem
-packaging and the reuse of unchanged modules were added after that test and
-have not been run on a package-installed server.
+- the rpm on AlmaLinux 9 with openvox-agent 8.33.0 (Ruby 3.2)
+- the deb on Ubuntu 24.04 with openvox-agent 9.4.0 (Ruby 4.0), with no locale
+  set, as under systemd
 
-Not yet tried from an assistant, and not tested on a package-installed
-OpenVox 8 server.
+Both ran `ovlens generate`, including the reuse of unchanged modules, and
+`ovlens mcp`.
+
+An earlier script version of the generator was tested on 2026-11-16 on a
+package-installed OpenVox 9 server (AlmaLinux 10, r10k 5.0.3): 7 environments
+of 24 to 35 modules each in 18 seconds, as an r10k `postrun`, with the MCP
+server started over SSH.
+
+Not yet released, not yet tried from an assistant, and the release workflow
+has not run on GitHub.

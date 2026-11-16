@@ -1,31 +1,44 @@
 #!/bin/bash
-# Build what a release attaches: the ovlens gem, the dependency gems it
-# resolves to, and a checksum file.
+# Build what a release is made from, at the versions Gemfile.lock pins:
 #
-#   script/release-assets <out-dir>
+#   dist/*.gem      the ovlens gem and the dependency gems a stock Ruby still
+#                   needs, for the harpworks gem index (miharp/packages)
+#   build/stage/    the same gems installed as a tree, for the rpm and deb
+#                   (script/package)
 #
-# The dependency gems go along so that the harpworks gem index, which is built
-# from release assets (miharp/packages), is complete on its own: installing
-# with --clear-sources then never consults rubygems.org.
+# Run it with the oldest Ruby ovlens supports.
 #
-# The set is whatever a stock Ruby still needs: the gems are installed into an
-# empty GEM_HOME, with Ruby's own default and bundled gems (irb, bigdecimal and
-# the like) visible through GEM_PATH. Those are in the OpenVox agent's Ruby
-# too, so they stay out of the set and nothing in it needs a compiler. Run it
-# with the oldest Ruby ovlens supports, so the versions chosen work everywhere.
+# How the set is chosen: every locked runtime gem goes into a throwaway index,
+# and ovlens is installed from that index alone into an empty GEM_HOME, with
+# Ruby's own default and bundled gems (irb, bigdecimal and the like) visible
+# through GEM_PATH. RubyGems then takes from the index only what a stock Ruby
+# cannot already satisfy, at the locked version. Those stock gems are in the
+# OpenVox agent's Ruby too, so nothing shipped needs a compiler.
 set -euo pipefail
 
-out="${1:?output directory}"
+dist="${DIST_DIR:-dist}"
+build="${BUILD_DIR:-build}"
 version=$(ruby -Ilib -rovlens/version -e 'print Ovlens::VERSION')
 work=$(mktemp -d)
+mkdir -p "$work/index/gems" "$dist" "$build/stage/opt/ovlens/gems"
 
-gem build ovlens.gemspec --output "$work/ovlens-$version.gem" > /dev/null
-GEM_HOME="$work/closure" GEM_PATH="$work/closure:$(ruby -e 'print Gem.default_dir')" \
-  gem install --no-document "$work/ovlens-$version.gem" > /dev/null
+script/locked-runtime-gems | while read -r name locked; do
+  ( cd "$work/index/gems" && gem fetch "$name" --version "$locked" --platform ruby > /dev/null )
+done
+gem build ovlens.gemspec --output "$work/index/gems/ovlens-$version.gem" > /dev/null
+# `gem generate_index` left RubyGems for a gem of its own.
+gem help generate_index > /dev/null 2>&1 || gem install --no-document rubygems-generate_index > /dev/null
+gem generate_index --directory "$work/index" > /dev/null
 
-mkdir -p "$out"
-cp "$work"/closure/cache/*.gem "$out/"
-( cd "$out"
-  if command -v sha256sum > /dev/null; then sha256sum -- *.gem; else shasum -a 256 -- *.gem; fi > checksums.txt
-)
-ls "$out"
+GEM_HOME="$work/tree" GEM_PATH="$work/tree:$(ruby -e 'print Gem.default_dir')" \
+  gem install --no-document --clear-sources --source "file://$work/index" ovlens --version "$version" > /dev/null
+
+# One package has to serve every agent Ruby, so a compiled extension cannot ship.
+if [ -n "$(find "$work/tree/extensions" -type f 2> /dev/null)" ]; then
+  echo "a runtime gem has a native extension; it cannot go into a noarch package" >&2
+  exit 1
+fi
+
+cp "$work"/tree/cache/*.gem "$dist/"
+cp -R "$work/tree/gems" "$work/tree/specifications" "$build/stage/opt/ovlens/gems/"
+echo "gems: $(cd "$dist" && ls -- *.gem | tr '\n' ' ')"

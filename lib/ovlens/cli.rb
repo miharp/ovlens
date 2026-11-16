@@ -18,6 +18,10 @@ module Ovlens
 
     # Returns the process exit status.
     def self.run(argv, out: $stdout, err: $stderr)
+      # Puppet code and the generated JSON are UTF-8 whatever the locale says,
+      # and a systemd unit or an SSH forced command often runs with none. This
+      # covers the libraries ovlens calls as well as its own reads.
+      Encoding.default_external = Encoding::UTF_8
       argv = argv.dup
       case argv.shift
       when 'generate' then generate(argv, out, err)

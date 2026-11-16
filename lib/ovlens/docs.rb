@@ -39,7 +39,7 @@ module Ovlens
     end
 
     def index(environment)
-      JSON.parse(File.read(File.join(@dir, environment, 'index.json')))
+      JSON.parse(File.read(File.join(@dir, environment, 'index.json'), encoding: 'UTF-8'))
     end
 
     # Index entries, optionally narrowed to one kind of entity or one module.
@@ -87,7 +87,7 @@ module Ovlens
     end
 
     def module_docs(environment, module_name)
-      JSON.parse(File.read(File.join(@dir, environment, 'modules', "#{module_name}.json")))
+      JSON.parse(File.read(File.join(@dir, environment, 'modules', "#{module_name}.json"), encoding: 'UTF-8'))
     end
 
     def lookup(docs, entry)

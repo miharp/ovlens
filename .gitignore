@@ -3,4 +3,5 @@ vendor/bundle/
 .ruby-lsp/
 pkg/
 *.gem
-Gemfile.lock
+build/
+dist/

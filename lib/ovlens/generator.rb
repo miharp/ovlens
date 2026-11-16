@@ -84,7 +84,7 @@ module Ovlens
     end
 
     def read_index(file)
-      JSON.parse(File.read(file))
+      JSON.parse(File.read(file, encoding: 'UTF-8'))
     rescue SystemCallError, JSON::ParserError
       nil
     end
@@ -170,7 +170,7 @@ module Ovlens
       Dir.chdir(mod.path) do
         OpenvoxStrings.generate(OpenvoxStrings::DEFAULT_SEARCH_PATTERNS, json: true, path: out_file, yard_args: YARD_ARGS)
       end
-      JSON.parse(File.read(out_file))
+      JSON.parse(File.read(out_file, encoding: 'UTF-8'))
     ensure
       YARD::Registry.clear
     end

@@ -1,0 +1,24 @@
+#!/bin/bash
+# Build the rpm and deb from the tree script/release-assets staged, and write
+# checksums for everything in dist/. Needs Docker, for nfpm.
+#
+# The package is self-contained: its gems live under /opt/ovlens and run with
+# the OpenVox agent's Ruby, so installing it downloads nothing. That is what
+# makes it work on a server with no access to a gem repository.
+set -euo pipefail
+
+dist="${DIST_DIR:-dist}"
+version=$(ruby -Ilib -rovlens/version -e 'print Ovlens::VERSION')
+nfpm="goreleaser/nfpm:${NFPM_VERSION:-v2.43.0}"
+
+# Named the way the harpworks repository expects: <package>_<version>_linux_<arch>.
+for format in rpm:noarch deb:all; do
+  docker run --rm -v "$PWD:/src" -w /src -e VERSION="$version" "$nfpm" package \
+    --config packaging/nfpm.yaml --packager "${format%%:*}" \
+    --target "$dist/ovlens_${version}_linux_${format##*:}.${format%%:*}"
+done
+
+( cd "$dist"
+  if command -v sha256sum > /dev/null; then sha256sum -- *.gem *.rpm *.deb; else shasum -a 256 -- *.gem *.rpm *.deb; fi > checksums.txt
+)
+ls "$dist"

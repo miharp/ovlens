@@ -1,0 +1,27 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Prints "name version" for every gem ovlens needs at run time, at the versions
+# Gemfile.lock pins: the gemspec's dependencies and everything they pull in.
+# Development gems are left out. Releases are built from this list, so what
+# ships is what the lockfile says and CI tested.
+
+require 'bundler'
+
+lock = Bundler::LockfileParser.new(File.read(File.expand_path('../Gemfile.lock', __dir__)))
+specs = lock.specs.group_by(&:name)
+# A gem can be locked once per platform; the plain Ruby one is the one to ship.
+pick = ->(name) { specs.fetch(name) { abort "#{name} is not in Gemfile.lock" }.min_by { |s| s.platform.to_s == 'ruby' ? 0 : 1 } }
+
+found = {}
+queue = pick.call('ovlens').dependencies.map(&:name)
+until queue.empty?
+  name = queue.shift
+  next if found.key?(name)
+
+  spec = pick.call(name)
+  found[name] = spec.version
+  queue.concat(spec.dependencies.map(&:name))
+end
+
+found.sort.each { |name, version| puts "#{name} #{version}" }

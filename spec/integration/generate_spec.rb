@@ -8,6 +8,9 @@ require 'rbconfig'
 RSpec.describe 'ovlens generate' do # rubocop:disable RSpec/DescribeClass
   let(:envs) { File.join(tmp, 'environments') }
   let(:docs) { File.join(tmp, 'docs') }
+  let(:exe) { File.expand_path('../../exe/ovlens', __dir__) }
+  # No UTF-8 locale, as under systemd or an SSH forced command.
+  let(:no_locale) { { 'LANG' => 'C', 'LC_ALL' => 'C' } }
 
   def write_module(environment, name, body: "# @summary Manages #{name}\nclass #{name} { }\n")
     dir = File.join(envs, environment, 'modules', name)
@@ -21,9 +24,8 @@ RSpec.describe 'ovlens generate' do # rubocop:disable RSpec/DescribeClass
     dir
   end
 
-  def generate(*args)
-    exe = File.expand_path('../../exe/ovlens', __dir__)
-    out, err, status = Open3.capture3(RbConfig.ruby, exe, 'generate', '--environmentpath', envs, '--docs-dir', docs, *args)
+  def generate(*args, env: {})
+    out, err, status = Open3.capture3(env, RbConfig.ruby, exe, 'generate', '--environmentpath', envs, '--docs-dir', docs, *args)
     [out, err, status.exitstatus]
   end
 
@@ -90,6 +92,21 @@ RSpec.describe 'ovlens generate' do # rubocop:disable RSpec/DescribeClass
     out, err, = generate('staging')
     expect(out).to include('staging: 0 modules')
     expect(err).to include('module metadata')
+  end
+
+  it 'handles non-ASCII documentation without a UTF-8 locale' do
+    write_module('staging', 'web', body: "# @summary Manages the caf\u00e9 \u2014 na\u00efvely\nclass web { }\n")
+    expect(generate('staging', env: no_locale).last).to eq(0)
+    # The second run reads the index back, which is where a non-UTF-8 read fails.
+    out, err, status = generate('staging', env: no_locale)
+    expect([out.strip, err, status]).to eq(['staging: unchanged', '', 0])
+    expect(index('staging')['entities'].first['summary']).to eq("Manages the caf\u00e9 \u2014 na\u00efvely")
+
+    request = JSON.generate(jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'search_code', arguments: { text: 'manages' } })
+    reply, = Open3.capture2(no_locale, RbConfig.ruby, exe, 'mcp', '--docs-dir', docs, stdin_data: "#{request}\n")
+    result = JSON.parse(reply)['result']
+    expect(result['isError']).to be(false)
+    expect(JSON.parse(result['content'].first['text'])['results'].first['name']).to eq('web')
   end
 
   it 'does nothing when given no environments' do
