@@ -13,23 +13,30 @@ take" or "which module provides `ensure_packages`" from what is really deployed.
 
 ## Install
 
-ovlens is not on RubyGems yet. Build it from a checkout:
+ovlens is not published on RubyGems. Releases go to the
+[harpworks repository](https://packages.harpworks.org), which carries ovlens
+and its dependencies, so `--clear-sources` installs from there alone:
 
 ```shell
-gem build ovlens.gemspec
-gem install ovlens-0.1.0.gem
+gem install --clear-sources --source https://packages.harpworks.org/gems ovlens
 ```
 
 It needs Ruby 3.2 or later. On an OpenVox server, install it into the agent's
 Ruby, which already has OpenVox:
 
 ```shell
-sudo /opt/puppetlabs/puppet/bin/gem install ovlens-0.1.0.gem
+sudo /opt/puppetlabs/puppet/bin/gem install --clear-sources --source https://packages.harpworks.org/gems ovlens
 ```
 
-The command is then `/opt/puppetlabs/puppet/bin/ovlens`. OpenVox is deliberately
-not a gem dependency. `ovlens mcp` does not need it; `ovlens generate` does, so
-on a workstation install the `openvox` gem as well.
+The command is then `/opt/puppetlabs/puppet/bin/ovlens`. The
+[ovlens Puppet module](https://github.com/miharp/puppet-ovlens) does this and
+sets up regular generation.
+
+OpenVox is deliberately not a gem dependency. `ovlens mcp` does not need it;
+`ovlens generate` does, so on a workstation install the `openvox` gem as well.
+
+There is no release yet. Until the first one, build the gem from a checkout
+with `gem build ovlens.gemspec` and install the file.
 
 ## Generate
 
@@ -136,6 +143,10 @@ bundle exec rake    # rubocop and rspec
 
 The specs in `spec/integration` run the real command with OpenVox and
 openvox-strings.
+
+A `v*` tag releases: the workflow runs the checks, builds the gem, and attaches
+it and its dependency gems to a GitHub Release. The harpworks repository picks
+them up from there within the hour.
 
 ## Status
 

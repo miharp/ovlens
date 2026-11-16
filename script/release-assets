@@ -1,0 +1,31 @@
+#!/bin/bash
+# Build what a release attaches: the ovlens gem, the dependency gems it
+# resolves to, and a checksum file.
+#
+#   script/release-assets <out-dir>
+#
+# The dependency gems go along so that the harpworks gem index, which is built
+# from release assets (miharp/packages), is complete on its own: installing
+# with --clear-sources then never consults rubygems.org.
+#
+# The set is whatever a stock Ruby still needs: the gems are installed into an
+# empty GEM_HOME, with Ruby's own default and bundled gems (irb, bigdecimal and
+# the like) visible through GEM_PATH. Those are in the OpenVox agent's Ruby
+# too, so they stay out of the set and nothing in it needs a compiler. Run it
+# with the oldest Ruby ovlens supports, so the versions chosen work everywhere.
+set -euo pipefail
+
+out="${1:?output directory}"
+version=$(ruby -Ilib -rovlens/version -e 'print Ovlens::VERSION')
+work=$(mktemp -d)
+
+gem build ovlens.gemspec --output "$work/ovlens-$version.gem" > /dev/null
+GEM_HOME="$work/closure" GEM_PATH="$work/closure:$(ruby -e 'print Gem.default_dir')" \
+  gem install --no-document "$work/ovlens-$version.gem" > /dev/null
+
+mkdir -p "$out"
+cp "$work"/closure/cache/*.gem "$out/"
+( cd "$out"
+  if command -v sha256sum > /dev/null; then sha256sum -- *.gem; else shasum -a 256 -- *.gem; fi > checksums.txt
+)
+ls "$out"
