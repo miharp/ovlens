@@ -66,6 +66,33 @@ RSpec.describe 'ovlens generate' do # rubocop:disable RSpec/DescribeClass
     expect(index('staging')['generated_at']).to eq(stamp)
   end
 
+  def module_file(environment, name) = File.join(docs, environment, 'modules', "#{name}.json")
+
+  it 'stores the docs of a module that is the same in two environments once' do
+    generate('--all')
+    expect(File.stat(module_file('staging', 'web')).ino).to eq(File.stat(module_file('production', 'web')).ino)
+    expect(File.stat(module_file('production', 'db')).nlink).to eq(1)
+  end
+
+  it 'links a module whose files changed but whose docs did not' do
+    generate('--all')
+    File.write(File.join(envs, 'staging', 'modules', 'web', 'manifests', 'init.pp'), "\n# a comment at the end\n", mode: 'a')
+    out, = generate('staging')
+    expect(out).to include('staging: 1 modules (1 parsed)')
+    expect(File.stat(module_file('staging', 'web')).ino).to eq(File.stat(module_file('production', 'web')).ino)
+  end
+
+  it 'notices an edit that keeps the size and the modification time' do
+    generate('production')
+    manifest = File.join(envs, 'production', 'modules', 'db', 'manifests', 'init.pp')
+    stat = File.stat(manifest)
+    File.write(manifest, File.read(manifest).sub('Manages db', 'Handles db'))
+    File.utime(stat.atime, stat.mtime, manifest)
+    out, = generate('production')
+    expect(out).to include('production: 2 modules (1 parsed)')
+    expect(index('production')['entities'].find { |e| e['name'] == 'db' }['summary']).to eq('Handles db')
+  end
+
   it 'drops a module that was removed from the environment' do
     generate('production')
     FileUtils.rm_rf(File.join(envs, 'production', 'modules', 'db'))

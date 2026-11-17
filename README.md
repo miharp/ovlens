@@ -76,10 +76,18 @@ ovlens generate [--environmentpath DIR] [--docs-dir DIR] [--all] [--force] [ENVI
 Modules are found through each environment's own `modulepath`, so
 `site-modules` and the base module path are included.
 
-A module is parsed only when its documented files have changed. Output for a
-module seen before, in any environment, is copied, and an environment with no
-changes is left untouched, so running it after every deploy or from a timer is
-cheap.
+Running it after every deploy or from a timer is cheap:
+
+- A module is parsed only when its documented files have changed.
+- Its files are read only when their sizes, times or inodes have changed, so
+  an unchanged environment costs a directory walk, not a read of every file.
+- A module's docs that already exist, in any environment and with the same
+  input or the same output, are hard-linked, so an estate whose environments
+  share most of their modules stores each module's docs about once.
+- An environment with no changes is left untouched.
+
+The first run after upgrading from 0.1 rewrites every environment once, without
+parsing anything, to record the new metadata.
 
 The exit code is 1 if an environment is missing or a module fails. A failed
 module is recorded in the index and the rest of the environment is still
@@ -133,8 +141,14 @@ subprocess and talks to it over stdio.
 | `get_docs` | The description, parameters with types and defaults, examples, file and line of one or more entities |
 
 `search_code` looks at names, summaries and the full documentation text, and
-hides entities marked `@api private` unless asked. Every tool takes an optional
-`environment`, which defaults to `production`.
+hides entities marked `@api private` unless asked. An entity named exactly what
+was searched for comes first, then those whose names contain more of the words;
+within that, rarer words and words in the name or summary count for more.
+Every tool takes an optional `environment`, which defaults to `production`.
+
+The server builds an environment's search index on the first search there,
+which takes under a second for a few hundred modules, and keeps those of the
+three most recently used environments in memory.
 
 `get_docs` takes several names in one call. A reply is kept to a size an MCP
 client will pass on: an entity too large for it, such as a resource type with a
@@ -206,5 +220,22 @@ environment correctly, including writing resources with the parameter names
 of the module versions deployed there. 0.1.1 fixes what that trial showed:
 one call per entity, a resource type too large for one reply, and no word
 that built-in types are not covered.
+
+On a synthetic estate of the 296 most-downloaded Forge modules in 30
+environments (3.7 GB of code, in a container with openvox-agent 8.33.0):
+
+| | 0.1.1 | 0.2.0 |
+| --- | --- | --- |
+| Generate all 30, cold | 55 s | 34 s |
+| Generate all 30, nothing changed | 14 s | 3 s |
+| Generate all 30, one manifest edited | 8 s | 4 s |
+| Docs on disk | 646 MB | 50 MB |
+| MCP server after searching all 30 | 418 MB | 294 MB |
+| Search, index already built | 10 to 15 ms | 0 to 7 ms |
+| Search, first in an environment | 0.25 s | 0.7 s |
+| Judged queries with a wanted entity in the top 3 | 23 of 40 | 28 of 40 |
+
+Most of the queries 0.2.0 still misses ask in other words than the docs use,
+such as "kernel parameter" for `sysctl`.
 
 Not tested on a package-installed OpenVox 8 server.

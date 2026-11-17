@@ -60,6 +60,16 @@ RSpec.describe Ovlens::Docs do
       expect(names(docs.search('production', '', module_name: 'systemd'))).to eq(%w[ruby systemd::escape])
     end
 
+    it 'keeps the search indexes of only the most recently used environments' do
+      write_docs(tmp, 'qa', sample_modules.slice('systemd'))
+      docs = described_class.new(tmp, cached_environments: 2)
+      %w[production staging qa].each { |env| docs.search(env, 'ruby') }
+      expect(docs.cached_environments).to eq(%w[qa staging])
+      docs.search('production', 'ruby')
+      expect(docs.cached_environments).to eq(%w[production qa])
+      expect(names(docs.search('production', 'escape'))).to eq(['systemd::escape'])
+    end
+
     it 'sees regenerated documentation without a restart' do
       docs.search('staging', 'ruby')
       sleep 0.01
