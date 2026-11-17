@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    ovlens (0.2.0)
+    ovlens (0.3.0)
       mcp (~> 1.10)
       openvox-strings (>= 6.0, < 8)
 
