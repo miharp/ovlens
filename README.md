@@ -188,7 +188,9 @@ bundle exec rake    # rubocop and rspec
 ```
 
 The specs in `spec/integration` run the real command with OpenVox and
-openvox-strings.
+openvox-strings. `bench/run` measures ovlens on a 30-environment estate in a
+container and checks search ranking against judged queries; see
+[bench/README.md](bench/README.md).
 
 Develop on Ruby 3.2, the oldest supported, as `.ruby-version` says. The
 lockfile has to resolve for it, and `bundle install` on a newer Ruby adds gem
@@ -222,7 +224,8 @@ one call per entity, a resource type too large for one reply, and no word
 that built-in types are not covered.
 
 On a synthetic estate of the 296 most-downloaded Forge modules in 30
-environments (3.7 GB of code, in a container with openvox-agent 8.33.0):
+environments (3.7 GB of code, in a container with openvox-agent 8.33.0;
+`bench/run` reproduces it):
 
 | | 0.1.1 | 0.2.0 |
 | --- | --- | --- |
