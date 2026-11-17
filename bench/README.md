@@ -55,4 +55,21 @@ docker exec ovlens-bench /opt/puppetlabs/puppet/bin/ruby -I /src/lib -r /bench/v
   /bench/search_eval.rb /srv/docs-search --verbose
 ```
 
-None of this runs in CI: the estate is a 128 MB download and 3.7 GB of copies.
+## In CI
+
+- **Every pull request and push to main** runs the ranking check, through
+  `bench/search-check`: the same score as `bench/run search`, without Docker,
+  using the checkout's bundle on one environment. The modules are cached on
+  the hash of `modules.txt`. It fails the build below `min_top3`.
+- **Weekly, on demand, and on pull requests that change `bench/`**, the
+  Benchmark workflow runs `bench/run` for the checkout and for the latest
+  release on the same runner, and puts both in the job summary, with the raw
+  output kept as an artifact for 90 days. Only the checkout's ranking can fail
+  it.
+
+The runners are x86 machines with 4 CPUs, so their timings are not comparable
+with the numbers in the main README, or from one week to the next. Compare the
+checkout with the release within one run.
+
+`bench/search-check` also works locally without Docker, but downloads the
+modules onto the host: `bench/search-check [work dir]`, after `bundle install`.

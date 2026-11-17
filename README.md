@@ -189,7 +189,8 @@ bundle exec rake    # rubocop and rspec
 
 The specs in `spec/integration` run the real command with OpenVox and
 openvox-strings. `bench/run` measures ovlens on a 30-environment estate in a
-container and checks search ranking against judged queries; see
+container and checks search ranking against judged queries. CI runs the
+ranking check on every pull request and the whole benchmark weekly; see
 [bench/README.md](bench/README.md).
 
 Develop on Ruby 3.2, the oldest supported, as `.ruby-version` says. The

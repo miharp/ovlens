@@ -33,3 +33,34 @@ jobs:
       # rubocop, then the specs. The integration specs run the real command
       # with OpenVox and openvox-strings.
       - run: bundle exec rake
+
+  search:
+    name: Search ranking
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+      # The modules pinned in bench/modules.txt, 128 MB, fetched once per list.
+      - uses: actions/cache@v5
+        with:
+          path: ~/ovlens-search-check/pool
+          key: bench-modules-${{ hashFiles('bench/modules.txt') }}
+      # Fails when fewer of the judged queries in bench/queries.yaml have a
+      # wanted entity in the top three than its min_top3 asks for.
+      - name: Score search against the judged queries
+        run: |
+          set +e
+          bench/search-check "$HOME/ovlens-search-check" > "$RUNNER_TEMP/search.txt"
+          status=$?
+          cat "$RUNNER_TEMP/search.txt"
+          {
+            echo '### Search ranking'
+            echo
+            echo '```text'
+            cat "$RUNNER_TEMP/search.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
