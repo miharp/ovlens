@@ -153,6 +153,24 @@ RSpec.describe 'ovlens generate' do # rubocop:disable RSpec/DescribeClass
     expect(err).to include('[error]: Failed to parse docstring')
   end
 
+  it 'compares environments it documented' do
+    generate('--all')
+    diff = lambda do
+      out, _err, status = Open3.capture3(RbConfig.ruby, exe, 'diff', '--docs-dir', docs, 'production', 'staging')
+      expect(status.exitstatus).to eq(0)
+      out
+    end
+    expect(diff.call).to include('Modules: 0 added, 1 removed, 0 changed, 1 unchanged', '  - db 1.2.3 (1 entity)')
+
+    File.write(File.join(envs, 'staging', 'modules', 'web', 'manifests', 'init.pp'), "\n# a comment at the end\n", mode: 'a')
+    generate('staging')
+    expect(diff.call).to include('  ~ web 1.2.3, code changed (docs unchanged)')
+
+    File.write(File.join(envs, 'staging', 'modules', 'web', 'manifests', 'extra.pp'), "# @summary More\nclass web::extra { }\n")
+    generate('staging')
+    expect(diff.call).to include('  ~ web 1.2.3, code changed (docs changed)', '      + web::extra (class)')
+  end
+
   it 'does nothing when given no environments' do
     out, _err, status = generate('')
     expect([out.strip, status]).to eq(['No environments given; nothing to do.', 0])

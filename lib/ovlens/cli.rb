@@ -9,6 +9,7 @@ module Ovlens
   module CLI
     USAGE = <<~TEXT.freeze
       Usage: ovlens generate [options] [ENVIRONMENT ...]   document environments after a deploy
+             ovlens diff [options] FROM TO                 compare the modules of two documented environments
              ovlens mcp [--docs-dir DIR]                   serve the documentation to an MCP client over stdio
              ovlens version
 
@@ -25,6 +26,7 @@ module Ovlens
       argv = argv.dup
       case argv.shift
       when 'generate' then generate(argv, out, err)
+      when 'diff' then diff(argv, out)
       when 'mcp' then mcp(argv)
       when 'version', '--version', '-v' then out.puts(VERSION) || 0
       when nil, 'help', '--help', '-h' then out.puts(USAGE) || 0
@@ -56,6 +58,25 @@ module Ovlens
       )
       # r10k substitutes "$modifiedenvs" as one space-separated argument.
       generator.run(argv.flat_map(&:split).uniq, all: options[:all]) ? 0 : 1
+    end
+
+    def self.diff(argv, out)
+      options = {}
+      OptionParser.new do |o|
+        o.banner = 'Usage: ovlens diff [--docs-dir DIR] [--module NAME] [--json] FROM TO'
+        o.on('--docs-dir DIR', 'Where the documentation is') { |v| options[:docs_dir] = v }
+        o.on('--module NAME', 'Compare only this module') { |v| options[:module] = v }
+        o.on('--json', 'Print JSON instead of text') { options[:json] = true }
+      end.parse!(argv)
+      raise Error, 'diff needs two environments: ovlens diff FROM TO' unless argv.size == 2
+
+      require 'json'
+      require_relative 'comparison'
+      require_relative 'docs'
+      docs = Docs.new(Ovlens.docs_dir(options[:docs_dir]))
+      comparison = Comparison.new(docs, *argv.map { |name| docs.resolve(name) }, module_name: options[:module])
+      out.puts(options[:json] ? JSON.pretty_generate(comparison.to_h) : comparison.text)
+      0
     end
 
     def self.mcp(argv)

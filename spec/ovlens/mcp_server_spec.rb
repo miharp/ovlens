@@ -16,9 +16,9 @@ RSpec.describe Ovlens::McpServer do
     [(JSON.parse(text) rescue text), result[:isError]] # rubocop:disable Style/RescueModifier
   end
 
-  it 'offers three read-only tools' do
+  it 'offers four read-only tools' do
     tools = server.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' })[:result][:tools]
-    expect(tools.map { |t| t[:name] }).to eq(%w[list_modules search_code get_docs])
+    expect(tools.map { |t| t[:name] }).to eq(%w[list_modules search_code get_docs compare_environments])
     expect(tools.map { |t| t[:annotations][:readOnlyHint] }).to all(be(true))
   end
 
@@ -119,6 +119,31 @@ RSpec.describe Ovlens::McpServer do
     request = { jsonrpc: '2.0', id: 1, method: 'initialize',
                 params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'spec', version: '0' } } }
     expect(server.handle(request)[:result][:instructions]).to include('built-in types', 'several names')
+  end
+
+  describe 'compare_environments' do
+    it 'reports what differs between two environments' do
+      write_docs(tmp, 'staging', sample_modules.except('stdlib'), 'systemd' => { 'fingerprint' => 'edited' })
+      data, error = call('compare_environments', { from: 'production', to: 'staging' })
+      expect(error).to be(false)
+      expect(data['summary']['modules']).to eq('added' => 0, 'removed' => 1, 'changed' => 1, 'unchanged' => 1)
+      expect(data['changed'].first).to include('name' => 'systemd', 'docs' => 'unchanged')
+    end
+
+    it 'reports an unknown environment as a tool error' do
+      text, error = call('compare_environments', { from: 'production', to: 'nosuch' })
+      expect([error, text]).to match([true, /Available: production/])
+    end
+
+    it 'keeps a large comparison within its budget' do
+      many = (1..800).to_h { |n| ["module#{n}_with_a_longer_name", { 'puppet_classes' => [entity("module#{n}", 'x')] }] }
+      write_docs(tmp, 'staging', many)
+      data, = call('compare_environments', { from: 'production', to: 'staging' })
+      expect(JSON.generate(data).size).to be <= described_class::CompareEnvironments::BUDGET
+      expect(data['added_omitted']).to be_positive
+      expect(data['hint']).to include('`module`')
+      expect(data['summary']['modules']['added']).to eq(800)
+    end
   end
 
   it 'suggests names when nothing matches' do
