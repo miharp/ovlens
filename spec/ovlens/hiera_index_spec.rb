@@ -57,6 +57,13 @@ RSpec.describe Ovlens::HieraIndex do
           port: 5432
           backends: [{ name: one, api_key: abc123 }]
         profile::app::api_token: abc
+        profile::ssh::key_passphrase: hunter3
+        profile::web::ssl_key: |
+          -----BEGIN RSA PRIVATE KEY-----
+          SYNTHETICRSAKEY
+          -----END RSA PRIVATE KEY-----
+        profile::web::ssl_cert: "-----BEGIN CERTIFICATE-----\nPUBLICCERT\n-----END CERTIFICATE-----\n"
+        profile::web::extra_keys: ["-----BEGIN OPENSSH PRIVATE KEY-----\nSYNTHETICSSHKEY\n-----END OPENSSH PRIVATE KEY-----\n"]
         profile::app::started: 2026-01-01
         lookup_options:
           profile::app::settings:
@@ -87,6 +94,14 @@ RSpec.describe Ovlens::HieraIndex do
         'db_password' => '<masked>', 'port' => 5432, 'backends' => [{ 'name' => 'one', 'api_key' => '<masked>' }],
       )
       expect(JSON.generate(index)).not_to include('hunter2', 'abc123', 'MIIB')
+    end
+
+    it 'masks a private key whatever its name, and a passphrase' do
+      expect(key('profile::web::ssl_key')['value']).to eq('<masked>')
+      expect(key('profile::web::extra_keys')['value']).to eq(['<masked>'])
+      expect(key('profile::ssh::key_passphrase')['value']).to eq('<masked>')
+      expect(key('profile::web::ssl_cert')['value']).to include('PUBLICCERT')
+      expect(JSON.generate(index)).not_to include('SYNTHETIC', 'hunter3')
     end
 
     it 'keeps lookup_options apart from the keys, and stores dates as text' do
@@ -167,11 +182,20 @@ RSpec.describe Ovlens::HieraIndex do
 
     context 'when a module is unchanged since the previous index' do
       let(:previous) do
-        { 'scanned' => { 'ntp' => 'print-1' }, 'lookups' => [{ 'key' => 'ntp::kept', 'module' => 'ntp', 'file' => 'x.pp' }] }
+        { 'format' => described_class::FORMAT, 'scanned' => { 'ntp' => 'print-1' },
+          'lookups' => [{ 'key' => 'ntp::kept', 'module' => 'ntp', 'file' => 'x.pp' }] }
       end
 
       it 'reuses what was found in it' do
         expect(index['lookups'].map { |l| l['key'] }).to eq(%w[classes ntp::kept])
+      end
+
+      it 'parses it again when the previous index is in another format' do
+        previous['format'] = described_class::FORMAT - 1
+        keys = index['lookups'].map { |l| l['key'] }
+        expect(keys).to include('ntp::first')
+        expect(keys).not_to include('ntp::kept')
+        expect(index['format']).to eq(described_class::FORMAT)
       end
     end
   end

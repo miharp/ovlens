@@ -19,6 +19,7 @@ RSpec.describe Ovlens::HieraQuery do
                                        defaults: { 'burst' => 'false' })
     write_docs(tmp, 'production', { 'ntp' => { 'puppet_classes' => [ntp] } })
     hiera = {
+      'format' => Ovlens::HieraIndex::FORMAT,
       'environment' => 'production',
       'layers' => [
         { 'layer' => 'environment', 'config' => 'hiera.yaml',
@@ -41,6 +42,11 @@ RSpec.describe Ovlens::HieraQuery do
       'errors' => [{ 'file' => 'data/broken.yaml', 'error' => 'Psych::SyntaxError: bad' }],
     }
     File.write(File.join(tmp, 'production', 'hiera.json'), JSON.generate(hiera))
+  end
+
+  it 'does not read Hiera data indexed in another format' do
+    File.write(File.join(tmp, 'production', 'hiera.json'), JSON.generate('environment' => 'production', 'keys' => []))
+    expect { query }.to raise_error(Ovlens::Error, /another version of ovlens. Run `ovlens generate --hiera` again/)
   end
 
   it 'says Hiera data is opt-in when an environment has none' do

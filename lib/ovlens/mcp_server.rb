@@ -24,7 +24,7 @@ module Ovlens
     HIERA_INSTRUCTIONS = ' Hiera data is indexed too: find_hiera_key shows where a key is set and which class parameter it ' \
                          'feeds, hiera_for_class shows how each parameter of a class gets its value, and check_hiera ' \
                          'finds keys for parameters that do not exist. Values are masked: encrypted ones show as ' \
-                         "#{HieraIndex::ENCRYPTED}, and secrets by name as #{HieraIndex::MASKED}.".freeze
+                         "#{HieraIndex::ENCRYPTED}, and private keys and secrets by name as #{HieraIndex::MASKED}.".freeze
 
     # The Hiera tools are offered only when some environment's Hiera data has
     # been indexed, which is opt-in.
@@ -387,8 +387,8 @@ module Ovlens
         data and in module data, with the value, and the class parameter the key feeds through automatic parameter
         lookup, with its type and default, and the files whose code looks it up by name. Give an exact key such as
         "ntp::servers", or part of one to list the keys containing it. Values are masked: encrypted ones show as
-        <encrypted>, and secrets by name as <masked>. This lists every place a key is set; which one a given node gets
-        depends on its facts.
+        <encrypted>, and private keys and secrets by name as <masked>. This lists every place a key is set; which one a
+        given node gets depends on its facts.
       TEXT
       input_schema(
         properties: {

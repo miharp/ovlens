@@ -6,6 +6,7 @@ require 'tmpdir'
 require 'fileutils'
 require 'ovlens'
 require 'ovlens/index'
+require 'ovlens/hiera_index'
 
 # Builds documentation trees shaped like the generator's output.
 module DocsFixture
@@ -48,7 +49,8 @@ module DocsFixture
       { 'key' => key, 'layer' => 'environment', 'level' => 'Common', 'file' => 'data/common.yaml', 'value' => value }
     end
     layers = [{ 'layer' => 'environment', 'config' => 'hiera.yaml', 'levels' => [{ 'name' => 'Common', 'indexed' => true }] }]
-    hiera = { 'environment' => environment, 'layers' => layers, 'keys' => keys, 'lookup_options' => [], 'errors' => [] }
+    hiera = { 'format' => Ovlens::HieraIndex::FORMAT, 'environment' => environment, 'layers' => layers, 'keys' => keys,
+              'lookup_options' => [], 'errors' => [] }
     File.write(File.join(dir, environment, 'hiera.json'), JSON.generate(hiera))
   end
 

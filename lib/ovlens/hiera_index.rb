@@ -16,8 +16,9 @@ module Ovlens
   # other backends, URIs, or functions without files are listed as not indexed.
   #
   # Nothing is decrypted, and values are masked before they are stored: an
-  # eyaml value becomes ENCRYPTED, and the value of a key, or of a key inside a
-  # hash, whose name matches a mask pattern becomes MASKED.
+  # eyaml value becomes ENCRYPTED, and a private key in PEM or PGP form, or the
+  # value of a key, or of a key inside a hash, whose name matches a mask
+  # pattern, becomes MASKED.
   #
   # It also records the keys Puppet code looks up by name, with lookup() or
   # hiera(), so a key that is read that way is not taken for a typo. That
@@ -26,7 +27,10 @@ module Ovlens
   # A file it cannot parse is reported without the parser's message, which
   # can quote the file, and so a value a mask would have hidden.
   class HieraIndex
-    DEFAULT_MASKS = %w[*password* *passwd* *secret* *token* *private_key* *api_key* *apikey* *credential*].freeze
+    # Raise when what is stored changes, or how it is found: an index in
+    # another format is neither read nor reused.
+    FORMAT = 1
+    DEFAULT_MASKS = %w[*password* *passwd* *passphrase* *secret* *token* *private_key* *api_key* *apikey* *credential*].freeze
     ENCRYPTED = '<encrypted>'
     MASKED = '<masked>'
     # What OpenVox uses for an environment without a hiera.yaml.
@@ -40,6 +44,8 @@ module Ovlens
     FILE_KEYS = %w[path paths glob globs mapped_paths].freeze
     URI_KEYS = %w[uri uris].freeze
     ENCRYPTED_VALUE = /ENC\[[A-Z0-9_]+,/
+    # -----BEGIN RSA PRIVATE KEY-----, BEGIN OPENSSH PRIVATE KEY, BEGIN PGP PRIVATE KEY BLOCK and so on.
+    PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY/
     INTERPOLATION = /%\{[^}]*\}/
     LOOKUP_FUNCTIONS = %w[lookup hiera hiera_array hiera_hash hiera_include].freeze
     # Only files that mention one are parsed.
@@ -56,7 +62,7 @@ module Ovlens
       @root = File.expand_path(path)
       @modules = modules
       @masks = masks
-      @previous = previous || {}
+      @previous = previous && previous['format'] == FORMAT ? previous : {}
       @cache = cache
     end
 
@@ -71,6 +77,7 @@ module Ovlens
       end
       lookups, scanned = code_lookups
       {
+        'format' => FORMAT,
         'environment' => @environment,
         'masks' => @masks,
         'layers' => layers,
@@ -82,12 +89,17 @@ module Ovlens
       }
     end
 
-    # The value with eyaml values and values under masked names replaced.
+    # The value with eyaml values, private keys and values under masked names
+    # replaced.
     def mask(value, name = nil)
       return MASKED if name && masked_name?(name)
 
       case value
-      when String then value.match?(ENCRYPTED_VALUE) ? ENCRYPTED : value
+      when String
+        if value.match?(ENCRYPTED_VALUE) then ENCRYPTED
+        elsif value.match?(PRIVATE_KEY) then MASKED
+        else value
+        end
       when Hash then value.to_h { |key, inner| [key.to_s, mask(inner, key.to_s)] }
       when Array then value.map { |inner| mask(inner) }
       when Date, Time, Symbol then value.to_s

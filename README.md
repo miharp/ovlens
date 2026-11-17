@@ -175,9 +175,12 @@ Values are masked before they are written, so the docs directory holds no
 secrets:
 
 - eyaml values become `<encrypted>`. Nothing is decrypted.
+- Values holding a private key (`-----BEGIN … PRIVATE KEY`) become
+  `<masked>`, whatever their name.
 - A key, or a key inside a hash, whose name matches `*password*`, `*passwd*`,
-  `*secret*`, `*token*`, `*private_key*`, `*api_key*`, `*apikey*` or
-  `*credential*` gets `<masked>`. Add patterns with `--hiera-mask`.
+  `*passphrase*`, `*secret*`, `*token*`, `*private_key*`, `*api_key*`,
+  `*apikey*` or `*credential*` gets `<masked>`. Add patterns with
+  `--hiera-mask`.
 
 Other values are stored as written, for anyone who can read the docs
 directory.
