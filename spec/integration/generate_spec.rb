@@ -136,6 +136,23 @@ RSpec.describe 'ovlens generate' do # rubocop:disable RSpec/DescribeClass
     expect(JSON.parse(result['content'].first['text'])['results'].first['name']).to eq('web')
   end
 
+  it "keeps openvox-strings' complaints about a module's docs off stdout" do
+    dir = write_module('staging', 'web')
+    FileUtils.mkdir_p(File.join(dir, 'lib', 'puppet', 'type'))
+    # A @doc built by joining strings is one openvox-strings cannot read.
+    File.write(File.join(dir, 'lib', 'puppet', 'type', 'widget.rb'), <<~RUBY)
+      Puppet::Type.newtype(:widget) do
+        @doc = 'Manages widgets.' + ' Joined.'
+        newparam(:name, namevar: true)
+      end
+    RUBY
+    out, err, status = generate('staging')
+    expect(status).to eq(0)
+    expect(out.lines.size).to eq(1)
+    expect(out).to start_with('staging: 1 modules (1 parsed)')
+    expect(err).to include('[error]: Failed to parse docstring')
+  end
+
   it 'does nothing when given no environments' do
     out, _err, status = generate('')
     expect([out.strip, status]).to eq(['No environments given; nothing to do.', 0])

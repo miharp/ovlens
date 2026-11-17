@@ -60,6 +60,9 @@ module Ovlens
       # only logs why. Send those errors to stderr so the gap is explained.
       Puppet::Util::Log.newdestination(:console)
       Puppet::Util::Log.level = :err
+      # openvox-strings reports docstrings it cannot parse through YARD's
+      # logger, which writes to stdout; keep stdout for the results.
+      YARD::Logger.instance.io = @err
     rescue LoadError => e
       raise Error, "generating needs OpenVox and openvox-strings in this Ruby (#{e.message}). " \
                    "On a server, install ovlens into the agent's Ruby with /opt/puppetlabs/puppet/bin/gem."
