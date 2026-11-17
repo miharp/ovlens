@@ -35,6 +35,23 @@ module DocsFixture
       'docstring' => { 'text' => text, 'tags' => tags } }.merge(extra.transform_keys(&:to_s))
   end
 
+  # Class ntp, with parameters servers and burst.
+  def ntp_module
+    tags = %w[servers burst].map { |name| { 'tag_name' => 'param', 'name' => name, 'text' => '', 'types' => ['Any'] } }
+    { 'ntp' => { 'puppet_classes' => [entity('ntp', 'Manages NTP', tags: tags, defaults: { 'burst' => 'false' })] } }
+  end
+
+  # A hiera.json setting each of `values` (key => value) in the environment's
+  # common.yaml.
+  def write_hiera(dir, environment, values)
+    keys = values.map do |key, value|
+      { 'key' => key, 'layer' => 'environment', 'level' => 'Common', 'file' => 'data/common.yaml', 'value' => value }
+    end
+    layers = [{ 'layer' => 'environment', 'config' => 'hiera.yaml', 'levels' => [{ 'name' => 'Common', 'indexed' => true }] }]
+    hiera = { 'environment' => environment, 'layers' => layers, 'keys' => keys, 'lookup_options' => [], 'errors' => [] }
+    File.write(File.join(dir, environment, 'hiera.json'), JSON.generate(hiera))
+  end
+
   def sample_modules
     {
       'nginx' => {

@@ -53,6 +53,19 @@ module Ovlens
       JSON.parse(File.read(File.join(@dir, environment, 'index.json'), encoding: 'UTF-8'))
     end
 
+    # The environment's Hiera index, written only by `ovlens generate --hiera`.
+    def hiera(environment)
+      file = File.join(@dir, environment, 'hiera.json')
+      raise Error, "Hiera data is not indexed for #{environment}. It is opt-in: run `ovlens generate --hiera`." unless File.file?(file)
+
+      JSON.parse(File.read(file, encoding: 'UTF-8'))
+    end
+
+    # The environments with indexed Hiera data.
+    def hiera_environments
+      environments.select { |name| File.file?(File.join(@dir, name, 'hiera.json')) }
+    end
+
     # Index entries, optionally narrowed to one kind of entity or one module.
     def entries(environment, type: nil, module_name: nil)
       narrow(index(environment)['entities'], type, module_name)

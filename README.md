@@ -18,6 +18,9 @@ writes.
   own module versions.
 - **What a promotion changes.** Compare two environments: modules added,
   removed or changed, and the classes, types and functions that came and went.
+- **Where a value comes from.** Optionally, your Hiera data too, with secrets
+  masked: where a key is set, which class parameter it feeds, and keys for
+  parameters that do not exist.
 - **Safe on a server.** ovlens only reads. It has no AI and no API key, and
   nothing listens on the network: the assistant starts it over SSH.
 - **Cheap to keep current.** Only changed modules are parsed, so a run after
@@ -37,6 +40,14 @@ Claude Code, with four tools:
 | `search_code` | Which classes, defined types, functions, types, tasks or plans match some words |
 | `get_docs` | The parameters, types, defaults, examples, file and line of one or more entities |
 | `compare_environments` | What differs between two environments |
+
+With [Hiera data](#hiera-data) indexed, three more:
+
+| Tool | Answers |
+| --- | --- |
+| `find_hiera_key` | Where a key is set, with its values, and the class parameter it feeds |
+| `hiera_for_class` | How each parameter of a class gets its value, and which have none |
+| `check_hiera` | Keys for class parameters that do not exist |
 
 ## Quick start
 
@@ -104,7 +115,8 @@ in `.mcp.json`.
 ### ovlens generate
 
 ```shell
-ovlens generate [--environmentpath DIR] [--docs-dir DIR] [--all] [--force] [ENVIRONMENT ...]
+ovlens generate [--environmentpath DIR] [--docs-dir DIR] [--all] [--force]
+                [--hiera [--hiera-mask PATTERN ...]] [ENVIRONMENT ...]
 ```
 
 - `--environmentpath`: default, the `environmentpath` setting.
@@ -112,6 +124,8 @@ ovlens generate [--environmentpath DIR] [--docs-dir DIR] [--all] [--force] [ENVI
   `/opt/puppetlabs/server/data/ovlens`.
 - `--all`: every environment. Otherwise, name them.
 - `--force`: parse every module again.
+- `--hiera`: index Hiera data too. See [Hiera data](#hiera-data).
+- `--hiera-mask`: also mask the values of keys matching this pattern.
 
 Modules come from each environment's own `modulepath`, `site-modules`
 included. Each module's docs are written to
@@ -149,6 +163,41 @@ Changed:
   ~ profile 0.1.0, code changed (docs changed)
       + profile::backup (class)
 ```
+
+### Hiera data
+
+Off by default. With `generate --hiera`, ovlens reads each environment's
+`hiera.yaml` and the `hiera.yaml` of each module that has one, and records
+every key in every data file, with its level and file. It does not resolve
+data for a node: `%{trusted.certname}` in a path matches every node's file.
+
+Values are masked before they are written, so the docs directory holds no
+secrets:
+
+- eyaml values become `<encrypted>`. Nothing is decrypted.
+- A key, or a key inside a hash, whose name matches `*password*`, `*passwd*`,
+  `*secret*`, `*token*`, `*private_key*`, `*api_key*`, `*apikey*` or
+  `*credential*` gets `<masked>`. Add patterns with `--hiera-mask`.
+
+Other values are stored as written, for anyone who can read the docs
+directory.
+
+Not indexed: the global layer (`/etc/puppetlabs/puppet/hiera.yaml`), levels
+whose backend does not read YAML, JSON or eyaml files (Vault, for example),
+and configurations older than version 5. `check_hiera` lists these levels. A key that
+Puppet code reads with `lookup()` is not reported as missing a parameter.
+
+A `generate` run without `--hiera` removes the environment's Hiera data.
+
+### ovlens hiera
+
+```shell
+ovlens hiera [--docs-dir DIR] [-e ENVIRONMENT] [--json] key KEY | class NAME | check
+```
+
+The Hiera tools on the command line. `check` exits 1 when it finds a key for
+a parameter that does not exist or a data file it cannot read, so it can
+gate a pull request.
 
 ### ovlens mcp
 
