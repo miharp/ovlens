@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'digest'
 require 'json'
 require 'tmpdir'
 require 'fileutils'
@@ -12,14 +13,18 @@ module DocsFixture
   attr_reader :tmp
 
   # `modules` maps a module name to its strings JSON (a hash of entity lists).
-  def write_docs(dir, environment, modules)
+  # `meta` maps a module name to index fields to set, such as a version or a
+  # fingerprint; the content digest follows from the JSON.
+  def write_docs(dir, environment, modules, meta = {})
     FileUtils.mkdir_p(File.join(dir, environment, 'modules'))
     entities = []
     listing = modules.map do |name, docs|
-      File.write(File.join(dir, environment, 'modules', "#{name}.json"), JSON.generate(docs))
+      json = JSON.generate(docs)
+      File.write(File.join(dir, environment, 'modules', "#{name}.json"), json)
       found = Ovlens::Index.entries(name, docs)
       entities.concat(found)
-      { 'name' => name, 'version' => '1.0.0', 'path' => "/code/#{name}", 'fingerprint' => "print-#{name}", 'entities' => found.size }
+      { 'name' => name, 'version' => '1.0.0', 'path' => "/code/#{name}", 'fingerprint' => "print-#{name}",
+        'content' => Digest::SHA256.hexdigest(json), 'entities' => found.size }.merge(meta.fetch(name, {}))
     end
     index = { 'environment' => environment, 'generated_at' => '2026-01-01T00:00:00Z', 'modules' => listing, 'entities' => entities }
     File.write(File.join(dir, environment, 'index.json'), JSON.generate(index))

@@ -16,6 +16,8 @@ writes.
   never seen are documented like any Forge module.
 - **Every environment.** Production, staging and each feature branch, with its
   own module versions.
+- **What a promotion changes.** Compare two environments: modules added,
+  removed or changed, and the classes, types and functions that came and went.
 - **Safe on a server.** ovlens only reads. It has no AI and no API key, and
   nothing listens on the network: the assistant starts it over SSH.
 - **Cheap to keep current.** Only changed modules are parsed, so a run after
@@ -27,13 +29,14 @@ writes.
 [openvox-strings](https://github.com/voxpupuli/openvox-strings) over every
 module in an environment and stores the result outside the code. `ovlens mcp`
 serves it to any [MCP](https://modelcontextprotocol.io/) client, such as
-Claude Code, with three tools:
+Claude Code, with four tools:
 
 | Tool | Answers |
 | --- | --- |
 | `list_modules` | Which modules and versions an environment has |
 | `search_code` | Which classes, defined types, functions, types, tasks or plans match some words |
 | `get_docs` | The parameters, types, defaults, examples, file and line of one or more entities |
+| `compare_environments` | What differs between two environments |
 
 ## Quick start
 
@@ -119,6 +122,33 @@ environment.
 
 The exit code is 1 when an environment does not exist or a module fails; the
 other modules are still documented.
+
+### ovlens diff
+
+```shell
+ovlens diff [--docs-dir DIR] [--module NAME] [--json] FROM TO
+```
+
+Compares two documented environments, as `compare_environments` does: modules
+added or removed, version changes, code that changed within the same version
+(and whether its docs changed with it), and the entities added or removed.
+Unchanged modules are only counted. It does not compare parameters.
+
+```text
+production -> staging
+Modules: 1 added, 0 removed, 2 changed, 41 unchanged
+Entities: 6 added, 1 removed
+
+Added:
+  + acme_backup 0.3.0 (4 entities)
+
+Changed:
+  ~ acme_web 1.4.0 -> 2.0.0 (docs changed)
+      + acme_web::vhost (defined type)
+      - acme_web::site (defined type)
+  ~ profile 0.1.0, code changed (docs changed)
+      + profile::backup (class)
+```
 
 ### ovlens mcp
 
