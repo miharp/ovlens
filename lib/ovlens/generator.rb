@@ -36,6 +36,8 @@ module Ovlens
       @force = force
       @hiera = hiera
       @hiera_masks = hiera_masks
+      # Lookups found in a module's code, by fingerprint, for every environment.
+      @lookup_cache = {}
       @out = out
       @err = err
     end
@@ -100,7 +102,7 @@ module Ovlens
       file = File.join(@docs_dir, name, 'hiera.json')
       previous = read_index(file)
       listed = modules.map { |mod, print| [mod.name, mod.path, print] }
-      index = HieraIndex.new(name, root, listed, masks: @hiera_masks, previous: previous).build
+      index = HieraIndex.new(name, root, listed, masks: @hiera_masks, previous: previous, cache: @lookup_cache).build
       fresh = JSON.parse(JSON.generate(index))
       unless previous&.except('generated_at') == fresh
         temporary = "#{file}.#{Process.pid}.tmp"
@@ -117,7 +119,8 @@ module Ovlens
       index['errors'].each { |error| @err.puts "#{name}: Hiera file #{error['file']}: #{error['error']}" }
       index['errors'].empty?
     rescue StandardError => e
-      @err.puts "#{name}: Hiera data not indexed: #{e.class}: #{e.message}"
+      # Not the message, which can quote the data.
+      @err.puts "#{name}: Hiera data not indexed: #{e.class} at #{e.backtrace&.first}"
       false
     end
 

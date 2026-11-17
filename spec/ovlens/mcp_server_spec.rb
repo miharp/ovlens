@@ -176,6 +176,22 @@ RSpec.describe Ovlens::McpServer do
       expect([error, text]).to match([true, /generate --hiera/])
     end
 
+    it 'cuts the list of places a key is set when they do not fit, and says how many were left out' do
+      write_hiera(tmp, 'staging', {})
+      data = JSON.parse(File.read(File.join(tmp, 'staging', 'hiera.json')))
+      data['keys'] = (1..500).map do |n|
+        { 'key' => 'ntp::servers', 'layer' => 'environment', 'level' => 'Per node',
+          'file' => "data/nodes/node#{n}.example.com.yaml", 'value' => ["ntp#{n}.example.com"] }
+      end
+      File.write(File.join(tmp, 'staging', 'hiera.json'), JSON.generate(data))
+      reply, error = call('find_hiera_key', { key: 'ntp::servers', environment: 'staging' })
+      expect(error).to be(false)
+      expect(JSON.generate(reply).size).to be <= described_class::HieraTool::BUDGET
+      key = reply['keys'].first
+      expect(key['set_in'].size + key['set_in_omitted']).to eq(500)
+      expect(reply['hint']).to include('_omitted')
+    end
+
     it 'shortens values to keep a reply within its budget' do
       names = (1..100).map { |n| "setting#{n}" }
       tags = names.map { |name| { 'tag_name' => 'param', 'name' => name, 'text' => '', 'types' => ['String'] } }

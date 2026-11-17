@@ -339,17 +339,43 @@ module Ovlens
     class HieraTool < Tool
       BUDGET = 40_000
       ENVIRONMENT_HELP = 'Environment name. Defaults to production.'
+      # The lists a reply may cut short. Values are Hiera data and never cut.
+      LISTS = %w[keys set_in looked_up_in lookup_options parameters module_data environment_data unknown_parameters
+                 files not_indexed errors].freeze
+      CAPS = [50, 20, 10, 5, 2, 1].freeze
+      HINT = 'Lists were cut to fit: each *_omitted count says how many entries were left out. ' \
+             '`ovlens hiera` on the server prints all of them.'
 
-      def self.answer(docs, environment)
-        environment = docs.resolve(environment)
-        result = nil
-        [HieraQuery::VALUE_LIMIT, 100, 0].each do |limit|
-          result = yield HieraQuery.new(docs, environment, value_limit: limit)
-          return reply(result) if Excerpt.size(result) <= BUDGET
+      class << self
+        # Shortens long values first, then the lists, until the reply fits.
+        def answer(docs, environment)
+          environment = docs.resolve(environment)
+          result = nil
+          [HieraQuery::VALUE_LIMIT, 100].each do |limit|
+            result = yield HieraQuery.new(docs, environment, value_limit: limit)
+            return reply(result) if Excerpt.size(result) <= BUDGET
+          end
+          CAPS.each do |cap|
+            short = cut(result, cap)
+            return reply(short.merge('hint' => HINT)) if Excerpt.size(short) <= BUDGET
+          end
+          failure('The answer is too large for one reply; `ovlens hiera` on the server prints all of it.')
+        rescue Error => e
+          failure(e.message)
         end
-        reply(result.merge('hint' => 'Values were shortened to fit; ask about fewer keys or one class at a time.'))
-      rescue Error => e
-        failure(e.message)
+
+        # A copy with at most `cap` entries in each of LISTS, wherever they
+        # are nested, and a "<list>_omitted" count beside each list that was cut.
+        def cut(data, cap)
+          data.each_with_object({}) do |(key, value), short|
+            if LISTS.include?(key) && value.is_a?(Array)
+              short[key] = value.first(cap).map { |item| item.is_a?(Hash) ? cut(item, cap) : item }
+              short["#{key}_omitted"] = value.size - cap if value.size > cap
+            else
+              short[key] = value
+            end
+          end
+        end
       end
     end
 

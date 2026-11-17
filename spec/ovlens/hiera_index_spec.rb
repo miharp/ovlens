@@ -105,6 +105,15 @@ RSpec.describe Ovlens::HieraIndex do
       end
     end
 
+    it 'reports a file it cannot parse without quoting it' do
+      write('data/common.json', '{"profile::db::password": SYNTHETIC_SECRET_ONE}')
+      write('data/roles/web.yaml', "profile::db::password: \"SYNTHETIC_SECRET_TWO\n  other: [\n")
+      errors = index['errors'].to_h { |e| e.values_at('file', 'error') }
+      expect(errors['data/common.json']).to start_with('JSON syntax error')
+      expect(errors['data/roles/web.yaml']).to match(/\AYAML syntax error at line \d+ column \d+: /)
+      expect(JSON.generate(index)).not_to include('SYNTHETIC_SECRET')
+    end
+
     it 'records a file it cannot parse and indexes the rest' do
       write('data/roles/broken.yaml', "a: [unclosed\n")
       write('data/roles/list.yaml', "- not\n- a hash\n")
@@ -123,20 +132,37 @@ RSpec.describe Ovlens::HieraIndex do
       write('manifests/site.pp', "lookup('classes', Array[String], 'unique', []).include\n")
       write('modules/ntp/manifests/init.pp', <<~PUPPET)
         class ntp {
+          # lookup('ntp::commented')
+          /* hiera('ntp::block_commented') */
+          $note = "lookup('ntp::in_a_string')"
           $a = lookup('ntp::extra_servers', Array, 'first', [])
           $b = lookup(["ntp::first", 'ntp::second'])
           $c = hiera("ntp::legacy")
           $d = lookup("ntp::${name}")
+          $e = 'ntp::method'.lookup
+          $f = lookup({ name => 'ntp::hashed', default_value => 1 })
         }
       PUPPET
+      write('modules/ntp/plans/sync.pp', "plan ntp::sync(TargetSpec $targets) { $s = lookup('ntp::plan_setting') }\n")
+      write('modules/ntp/manifests/broken.pp', "class ntp::broken { lookup('ntp::unparsed') \n")
     end
 
-    it 'finds literal keys in the environment and its modules' do
-      init = 'modules/ntp/manifests/init.pp'
+    it 'finds the literal names the code looks up, and not those in comments or strings' do
+      init = %w[ntp::extra_servers ntp::first ntp::second ntp::legacy ntp::method ntp::hashed]
       expect(index['lookups'].map { |l| l.values_at('key', 'module', 'file') }).to eq(
-        [['classes', nil, 'manifests/site.pp']] + %w[ntp::extra_servers ntp::first ntp::legacy].map { |key| [key, 'ntp', init] },
+        [['classes', nil, 'manifests/site.pp']] + init.map { |key| [key, 'ntp', 'modules/ntp/manifests/init.pp'] } +
+        [['ntp::plan_setting', 'ntp', 'modules/ntp/plans/sync.pp']],
       )
       expect(index['scanned']).to eq('ntp' => 'print-1')
+    end
+
+    it 'parses a module once for every environment with the same copy' do
+      cache = {}
+      described_class.new('production', root, modules, cache: cache).build
+      # Nothing exists under staging: what it finds comes from the cache.
+      staging = File.join(tmp, 'staging')
+      again = described_class.new('staging', staging, [['ntp', File.join(staging, 'modules', 'ntp'), 'print-1']], cache: cache).build
+      expect(again['lookups'].map { |l| l.values_at('key', 'file') }).to include(['ntp::first', 'modules/ntp/manifests/init.pp'])
     end
 
     context 'when a module is unchanged since the previous index' do

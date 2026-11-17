@@ -20,7 +20,11 @@ module Ovlens
   # hash, whose name matches a mask pattern becomes MASKED.
   #
   # It also records the keys Puppet code looks up by name, with lookup() or
-  # hiera(), so a key that is read that way is not taken for a typo.
+  # hiera(), so a key that is read that way is not taken for a typo. That
+  # needs OpenVox's parser, which `ovlens generate` loads.
+  #
+  # A file it cannot parse is reported without the parser's message, which
+  # can quote the file, and so a value a mask would have hidden.
   class HieraIndex
     DEFAULT_MASKS = %w[*password* *passwd* *secret* *token* *private_key* *api_key* *apikey* *credential*].freeze
     ENCRYPTED = '<encrypted>'
@@ -37,19 +41,23 @@ module Ovlens
     URI_KEYS = %w[uri uris].freeze
     ENCRYPTED_VALUE = /ENC\[[A-Z0-9_]+,/
     INTERPOLATION = /%\{[^}]*\}/
-    LOOKUP_CALL = /\b(?:lookup|hiera|hiera_array|hiera_hash|hiera_include)\s*\(\s*\[?\s*(['"])([^'"$\s]+)\1/
+    LOOKUP_FUNCTIONS = %w[lookup hiera hiera_array hiera_hash hiera_include].freeze
+    # Only files that mention one are parsed.
+    MENTIONS_LOOKUP = /\b(?:lookup|hiera)/
     CODE = '{manifests,functions,plans}/**/*.pp'
 
     # `modules` lists [name, path, fingerprint]; module data is read only from
-    # modules with a hiera.yaml, as OpenVox does. The lookups found in a module
-    # are taken from `previous`, an earlier index, while its fingerprint is
-    # the same.
-    def initialize(environment, path, modules, masks: DEFAULT_MASKS, previous: nil)
+    # modules with a hiera.yaml, as OpenVox does. A module's code is parsed
+    # for lookups only when `previous`, an earlier index, has a different
+    # fingerprint for it, and `cache` (fingerprint => lookups), shared by the
+    # environments of one run, has none.
+    def initialize(environment, path, modules, masks: DEFAULT_MASKS, previous: nil, cache: {})
       @environment = environment
       @root = File.expand_path(path)
       @modules = modules
       @masks = masks
       @previous = previous || {}
+      @cache = cache
     end
 
     def build
@@ -148,7 +156,7 @@ module Ovlens
       end
       config
     rescue Psych::Exception, SystemCallError => e
-      @errors << { 'file' => relative(path), 'error' => "#{e.class}: #{e.message}" }
+      unreadable(path, e)
       nil
     end
 
@@ -197,26 +205,80 @@ module Ovlens
     # and the fingerprint of each module scanned.
     def code_lookups
       before = @previous.fetch('lookups', []).group_by { |entry| entry['module'] }
-      lookups = scan(@root, nil)
+      lookups = scan(@root).map { |key, file| { 'key' => key, 'file' => relative(File.join(@root, file)) } }
       scanned = {}
       @modules.each do |name, path, print|
-        same = print && @previous.dig('scanned', name) == print
-        lookups.concat(same ? before.fetch(name, []) : scan(path, name))
+        if print && @previous.dig('scanned', name) == print
+          lookups.concat(before.fetch(name, []))
+        else
+          found = (print && @cache[print]) || scan(path)
+          @cache[print] = found if print
+          lookups.concat(found.map { |key, file| { 'key' => key, 'file' => relative(File.join(path, file)), 'module' => name } })
+        end
         scanned[name] = print if print
       end
       [lookups, scanned]
     end
 
-    def scan(dir, module_name)
-      Dir.glob(File.join(dir, CODE)).flat_map do |file|
-        keys = File.read(file, encoding: 'UTF-8').scrub.scan(LOOKUP_CALL).map(&:last).uniq
-        keys.map do |key|
-          entry = { 'key' => key, 'file' => relative(file) }
-          entry['module'] = module_name if module_name
-          entry
-        end
+    # [key, file] for each key looked up in the code under `dir`, with the
+    # file relative to it.
+    def scan(dir)
+      require 'puppet'
+      Dir.glob(CODE, base: dir).flat_map do |file|
+        source = File.read(File.join(dir, file), encoding: 'UTF-8').scrub
+        next [] unless source.match?(MENTIONS_LOOKUP)
+
+        looked_up(source, file, plan: file.start_with?('plans/')).map { |key| [key, file] }
       rescue SystemCallError
         []
+      end
+    end
+
+    # The key names given literally to lookup() and hiera() calls in some
+    # Puppet code, as functions or as methods ('key'.lookup), alone, in a list
+    # of names to try, or as the `name` of an options hash. Comments do not
+    # count, and a name built by interpolation is skipped.
+    def looked_up(source, file, plan:)
+      model = parse(source, file, plan) or return []
+      keys = []
+      model._pcore_all_contents([]) do |node|
+        case node
+        when Puppet::Pops::Model::CallNamedFunctionExpression
+          keys.concat(literal_names(node.arguments.first)) if lookup_function?(node.functor_expr)
+        when Puppet::Pops::Model::CallMethodExpression
+          access = node.functor_expr
+          if access.is_a?(Puppet::Pops::Model::NamedAccessExpression) && lookup_function?(access.right_expr)
+            keys.concat(literal_names(access.left_expr))
+          end
+        end
+      end
+      keys.uniq
+    end
+
+    # Plans parse only with the tasks setting on.
+    def parse(source, file, plan)
+      tasks = Puppet[:tasks]
+      Puppet[:tasks] = true if plan
+      Puppet::Pops::Parser::Parser.new.parse_string(source, file).model
+    rescue Puppet::Error
+      # A manifest OpenVox cannot parse cannot be compiled either.
+      nil
+    ensure
+      Puppet[:tasks] = tasks
+    end
+
+    def lookup_function?(name)
+      name.is_a?(Puppet::Pops::Model::QualifiedName) && LOOKUP_FUNCTIONS.include?(name.value)
+    end
+
+    def literal_names(argument)
+      case argument
+      when Puppet::Pops::Model::LiteralString then [argument.value]
+      when Puppet::Pops::Model::LiteralList then argument.values.flat_map { |value| literal_names(value) }
+      when Puppet::Pops::Model::LiteralHash
+        entry = argument.entries.find { |e| e.key.respond_to?(:value) && e.key.value == 'name' }
+        entry && !entry.value.is_a?(Puppet::Pops::Model::LiteralHash) ? literal_names(entry.value) : []
+      else []
       end
     end
 
@@ -233,7 +295,11 @@ module Ovlens
     def index_file(file, format, level, layer_info)
       data = format == :json ? JSON.parse(File.read(file, encoding: 'UTF-8')) : load_yaml(file)
       return if data.nil?
-      raise TypeError, "not a hash of keys (#{data.class})" unless data.is_a?(Hash)
+
+      unless data.is_a?(Hash)
+        @errors << { 'file' => relative(file), 'error' => "not a hash of keys (#{data.class})" }
+        return
+      end
 
       module_name = layer_info['module']
       data.each do |key, value|
@@ -247,8 +313,26 @@ module Ovlens
           @keys << { 'key' => key }.merge(where).merge('value' => mask(value, key))
         end
       end
-    rescue Psych::Exception, JSON::ParserError, TypeError, SystemCallError => e
-      @errors << { 'file' => relative(file), 'error' => "#{e.class}: #{e.message}" }
+    rescue Psych::Exception, JSON::ParserError, SystemCallError => e
+      unreadable(file, e)
+    end
+
+    # Records why a file could not be read: where the parser stopped, never
+    # its message, which can quote the file.
+    def unreadable(file, error)
+      @errors << { 'file' => relative(file), 'error' => diagnostic(error) }
+    end
+
+    def diagnostic(error)
+      case error
+      when Psych::SyntaxError then "YAML syntax error at line #{error.line} column #{error.column}: #{error.problem}"
+      when Psych::Exception then "YAML not loaded: #{error.class.name.split('::').last}"
+      when JSON::ParserError
+        at = error.message[/line \d+,? column \d+/]
+        at ? "JSON syntax error at #{at}" : 'JSON syntax error'
+      when SystemCallError then "cannot read the file: #{error.class.name.split('::').last}"
+      else error.class.name
+      end
     end
 
     def load_yaml(file)
