@@ -1,8 +1,8 @@
 # Benchmarks
 
 These scripts measure ovlens on a synthetic estate large enough to show how it
-scales, and check that search ranking has not got worse. The numbers in the
-main README's Status section come from them.
+scales, and check that search ranking has not got worse. Results are at the
+end.
 
 ```shell
 bench/run            # build the estate if needed, then run every measurement
@@ -73,3 +73,26 @@ checkout with the release within one run.
 
 `bench/search-check` also works locally without Docker, but downloads the
 modules onto the host: `bench/search-check [work dir]`, after `bundle install`.
+
+## Results
+
+0.1.1 against 0.2.0, on a 10-CPU Arm Mac:
+
+| | 0.1.1 | 0.2.0 |
+| --- | --- | --- |
+| Generate all 30, cold | 55 s | 34 s |
+| Generate all 30, nothing changed | 14 s | 3 s |
+| Generate all 30, one manifest edited | 8 s | 4 s |
+| Docs on disk | 646 MB | 50 MB |
+| MCP server after searching all 30 | 418 MB | 294 MB |
+| Search, index already built | 10 to 15 ms | 0 to 7 ms |
+| Search, first in an environment | 0.25 s | 0.7 s |
+| Judged queries with a wanted entity in the top 3 | 23 of 40 | 28 of 40 |
+
+On a 4-CPU x86 GitHub runner the disk, memory and ranking results are the
+same and unchanged runs are about a third faster, but a cold run takes as long
+as with 0.1.1, about a minute: there the time goes to parsing, not to writing
+copies.
+
+Most of the queries 0.2.0 still misses ask in other words than the docs use,
+such as "kernel parameter" for `sysctl`.
