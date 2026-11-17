@@ -9,6 +9,10 @@ fails to compile. ovlens documents every module in your OpenVox environments,
 at the versions deployed there, so the assistant can look things up before it
 writes.
 
+![Claude Code asked to open the HTTPS port in a profile looks up the deployed firewall module through ovlens and writes jump => 'ACCEPT' with the port from Hiera](assets/firewall.gif)
+
+*Claude Code with ovlens on a demo control repo, at 2× speed.*
+
 - **The versions you run.** puppetlabs-firewall 7 replaced `action` with
   `jump`. From memory, an assistant writes `action => 'accept'`; with ovlens it
   checks the deployed type and writes `jump => 'ACCEPT'`.
@@ -165,6 +169,10 @@ Changed:
 ```
 
 ### Hiera data
+
+![Claude Code asked why a Hiera setting is ignored finds the misspelt key with ovlens's check_hiera](assets/hiera.gif)
+
+*Finding a misspelt Hiera key, at 2× speed.*
 
 Off by default. With `generate --hiera`, ovlens reads each environment's
 `hiera.yaml` and the `hiera.yaml` of each module that has one, and records
