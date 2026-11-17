@@ -37,6 +37,32 @@ RSpec.describe Ovlens::Fingerprint do
     expect(described_class.of(dir, 'web', 's')).to eq(before)
   end
 
+  describe '.stat_key' do
+    let(:manifest) { File.join(dir, 'manifests', 'init.pp') }
+
+    def key = described_class.stat_key(dir, 'web', 's', described_class.files(dir))
+
+    it 'stays the same while nothing is touched' do
+      first = key
+      expect(key).to eq(first)
+    end
+
+    it 'changes on an edit that keeps the size and the modification time' do
+      before = key
+      stat = File.stat(manifest)
+      File.write(manifest, File.read(manifest).tr('w', 'x'))
+      File.utime(stat.atime, stat.mtime, manifest)
+      expect([File.size(manifest), File.mtime(manifest)]).to eq([stat.size, stat.mtime])
+      expect(key).not_to eq(before)
+    end
+
+    it 'changes when a file is added or removed' do
+      before = key
+      File.write(File.join(dir, 'manifests', 'extra.pp'), "class web::extra { }\n")
+      expect(key).not_to eq(before)
+    end
+  end
+
   it 'depends on the module name and the salt' do
     base = described_class.of(dir, 'web', 's')
     expect(described_class.of(dir, 'other', 's')).not_to eq(base)

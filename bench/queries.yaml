@@ -1,0 +1,51 @@
+# Judged searches for bench/search_eval.rb, over the production environment of
+# the benchmark estate. Each lists the entities a person asking would want; a
+# query counts as found when one of them is in the top three results.
+#
+# Written before any ranking variant was scored, so that the ranking would not
+# be tuned to the answers. Add queries rather than editing these, and raise
+# min_top3 only when a change has earned it.
+min_top3: 28
+queries:
+  - { query: apache virtual host, want: [apache::vhost] }
+  - { query: vhost, type: defined_types, want: [apache::vhost] }
+  - { query: virtual host, want: [apache::vhost, nginx::resource::server] }
+  - query: reverse proxy
+    want: [apache::vhost::proxy, Apache::Vhost::ProxyPass, apache::mod::proxy, nginx::resource::location,
+           nginx::resource::server, haproxy::backend, haproxy::listen, haproxy::frontend, squid]
+  - { query: ssl certificate, want: [cfssl::certificate_request, letsencrypt::certonly, java_ks, apache::mod::ssl] }
+  - { query: tls certificate, want: [letsencrypt::certonly, cfssl::certificate_request, letsencrypt] }
+  - { query: ntp server, want: [ntp, chrony] }
+  - { query: time synchronization, want: [ntp, chrony] }
+  - { query: logrotate, want: [logrotate, logrotate::rule] }
+  - { query: rotate log files, want: [logrotate::rule, logrotate] }
+  - { query: docker container, want: [docker::run] }
+  - { query: run a container, want: [docker::run] }
+  - { query: postgresql database, want: [postgresql::server::database, postgresql::server::db] }
+  - { query: create a database user, want: [postgresql::server::role, mysql_user, mysql::db, postgresql::server::db] }
+  - { query: create a user, want: [accounts::user] }
+  - { query: mysql user, want: [mysql_user, mysql::db] }
+  - { query: firewall rule, want: [firewall, firewalld_rich_rule, firewalld_port] }
+  - { query: open a port, want: [firewall, firewalld_port] }
+  - { query: cron job, want: [cron::job, cron] }
+  - { query: scheduled job, want: [cron::job, cron, systemd::timer, scheduled_task] }
+  - { query: systemd unit, want: [systemd::unit_file] }
+  - { query: systemd timer, want: [systemd::timer] }
+  - { query: git repository, want: [vcsrepo] }
+  - { query: clone a git repo, want: [vcsrepo] }
+  - { query: kernel parameter, want: [sysctl] }
+  - { query: load kernel module, want: [kmod::load] }
+  - { query: selinux boolean, want: [selinux::boolean] }
+  - { query: apt repository, want: [apt::source] }
+  - { query: install packages, want: [stdlib::ensure_packages, ensure_packages] }
+  - { query: java keystore, want: [java_ks] }
+  - { query: nginx server, want: [nginx::resource::server] }
+  - { query: haproxy backend, want: [haproxy::backend] }
+  - { query: sudo rule, want: [sudo::conf] }
+  - { query: ssh server, want: [ssh::server, ssh::server::config] }
+  - { query: open files limit, want: [limits::limits] }
+  - { query: timezone, want: [timezone] }
+  - { query: download a file, want: [archive, remote_file, download_uncompress] }
+  - { query: keepalived vrrp, want: [keepalived::vrrp::instance] }
+  - { query: rabbitmq user, want: [rabbitmq_user] }
+  - { query: redis server, want: [redis] }

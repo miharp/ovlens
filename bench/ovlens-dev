@@ -1,0 +1,15 @@
+#!/opt/puppetlabs/puppet/bin/ruby
+# frozen_string_literal: true
+
+# Runs ovlens from the checkout mounted at /src, with the dependency gems the
+# installed package ships, so a change can be measured before it is released.
+vendor = '/opt/ovlens/gems'
+ENV['GEM_PATH'] = [vendor, *Gem.path].join(File::PATH_SEPARATOR)
+Gem.clear_paths
+Dir[File.join(vendor, 'specifications', '*.gemspec')].each do |file|
+  spec = Gem::Specification.load(file)
+  gem spec.name, "= #{spec.version}" unless spec.name == 'ovlens'
+end
+$LOAD_PATH.unshift('/src/lib')
+require 'ovlens/cli'
+exit Ovlens::CLI.run(ARGV)

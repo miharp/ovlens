@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# bench/search-check [work dir]
+#
+# The ranking check without Docker, as CI runs it on every pull request: fetch
+# the pinned modules, document them as one environment with this checkout and
+# its bundle, and score search against queries.yaml. Exits non-zero below the
+# minimum there.
+#
+# Unlike bench/run, this runs on the host and downloads the modules (128 MB)
+# into <work dir>/pool, where they stay for the next run; CI caches that
+# directory. Needs Python 3 and `bundle install`.
+set -euo pipefail
+
+repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+work=${1:-${TMPDIR:-/tmp}/ovlens-search-check}
+env=$work/environments/production
+
+python3 "$repo/bench/modules.py" fetch "$repo/bench/modules.txt" "$work/pool"
+mkdir -p "$env"
+ln -sfn "$work/pool" "$env/modules"
+printf 'modulepath = modules\n' > "$env/environment.conf"
+
+cd "$repo"
+# openvox-strings reports unparseable docstrings in the modules on stderr;
+# keep those out of the result.
+bundle exec ruby exe/ovlens generate --environmentpath "$work/environments" --docs-dir "$work/docs" production \
+  2> "$work/generate.log"
+bundle exec ruby -W0 -Ilib bench/search_eval.rb "$work/docs"

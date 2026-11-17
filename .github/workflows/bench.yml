@@ -1,0 +1,83 @@
+---
+name: Benchmark
+
+# The full benchmark in bench/: the checkout and the latest release, measured
+# one after the other on the same runner, so the two can be compared. Weekly,
+# on demand, and on pull requests that change the benchmark itself, rather
+# than on every push: it takes about ten minutes, and timings vary between
+# runs and between runners, so they are reported in the job summary, not
+# checked. Only the checkout's search ranking can fail it.
+
+# yamllint disable-line rule:truthy
+on:
+  schedule:
+    - cron: '23 5 * * 1'
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - bench/**
+      - .github/workflows/bench.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bench:
+    name: Benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the estate
+        run: bench/run setup
+
+      - name: Measure the checkout and the latest release
+        run: |
+          set +e
+          release=$(docker exec ovlens-bench rpm -q --qf '%{VERSION}' ovlens)
+          echo "$release" > "$RUNNER_TEMP/release.txt"
+          for who in checkout release; do
+            for step in generate mcp search; do
+              if [ "$who" = release ]; then export OVLENS_BENCH_INSTALLED=1; fi
+              bench/run "$step" > "$RUNNER_TEMP/$who-$step.txt" 2>&1
+              echo "$who $step: exit $?" | tee -a "$RUNNER_TEMP/status.txt"
+            done
+          done
+
+      - name: Report
+        if: always()
+        run: |
+          {
+            echo "## Benchmark"
+            echo
+            echo "The checkout ($(git rev-parse --short HEAD)) and ovlens $(cat "$RUNNER_TEMP/release.txt" 2> /dev/null || echo '?'), the latest release, on a runner with $(getconf _NPROCESSORS_ONLN) CPUs ($(uname -m))."
+            echo "Timings vary between runs; compare the two columns of one run, not runs on different days."
+            for step in search generate mcp; do
+              for who in checkout release; do
+                echo
+                echo "### $step: $who"
+                echo
+                echo '```text'
+                cat "$RUNNER_TEMP/$who-$step.txt" 2> /dev/null || echo "(not run)"
+                echo '```'
+              done
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: benchmark
+          path: ${{ runner.temp }}/*.txt
+          retention-days: 90
+
+      # The release's ranking is reported, not checked: an older release is
+      # expected to score below the current minimum.
+      - name: Check the checkout's search ranking
+        run: |
+          grep -qx 'checkout search: exit 0' "$RUNNER_TEMP/status.txt"

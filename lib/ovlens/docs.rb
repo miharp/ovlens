@@ -3,6 +3,7 @@
 require 'did_you_mean'
 require 'json'
 require_relative '../ovlens'
+require_relative 'search_index'
 
 module Ovlens
   # Reads the tree the generator writes and answers questions about it. Files
@@ -12,12 +13,22 @@ module Ovlens
       puppet_classes defined_types puppet_functions data_types data_type_aliases
       resource_types providers puppet_tasks puppet_plans
     ].freeze
+    # Search indexes kept in memory, most recently used first. Building one
+    # takes a fraction of a second; keeping one costs tens of megabytes for a
+    # large environment, so a session that visits many keeps only a few.
+    CACHED_ENVIRONMENTS = 3
 
     attr_reader :dir
 
-    def initialize(dir)
+    def initialize(dir, cached_environments: CACHED_ENVIRONMENTS)
       @dir = dir
-      @corpus = {}
+      @limit = cached_environments
+      @indexes = {}
+    end
+
+    # The environments whose search index is in memory, most recent first.
+    def cached_environments
+      @indexes.keys.reverse
     end
 
     def environments
@@ -49,21 +60,13 @@ module Ovlens
 
     # Returns the matching index entries, best first, and whether every word
     # matched ("all") or the search fell back to entities matching some ("any").
+    # Without text, everything that passes the filters, by name.
     def search(environment, text, type: nil, module_name: nil)
-      rows = corpus(environment).select { |entry, _| narrow([entry], type, module_name).any? }
-      words = text.to_s.downcase.split
-      return [rows.map(&:first).sort_by { |e| e['name'] }, 'all'] if words.empty?
+      return [narrow(index(environment)['entities'], type, module_name).sort_by { |e| e['name'] }, 'all'] if SearchIndex.words(text).empty?
 
-      mode = 'all'
-      ranked = rows.filter_map { |entry, body| (score = rank(entry, body, words)) && [score, entry['name'], entry] }
-      if ranked.empty?
-        mode = 'any'
-        ranked = rows.filter_map do |entry, body|
-          hits = words.count { |w| body.include?(w) }
-          [-hits, entry['name'], entry] if hits.positive?
-        end
+      search_index(environment).search(text) do |entry|
+        (type.nil? || entry['type'] == type) && (module_name.nil? || entry['module'] == module_name)
       end
-      [ranked.sort_by { |score, name, _| [score, name] }.map(&:last), mode]
     end
 
     # The full strings entry for one index entry.
@@ -96,34 +99,25 @@ module Ovlens
       end
     end
 
-    # Each index entry paired with the lower-cased text of its documentation
-    # (description, parameters, types, defaults, examples). Cached until the
-    # environment's index is regenerated.
-    def corpus(environment)
+    # The environment's search index, built on first use and rebuilt when the
+    # environment is regenerated. The least recently used is dropped when more
+    # than the limit are in memory.
+    def search_index(environment)
       stamp = File.mtime(File.join(@dir, environment, 'index.json'))
-      cached = @corpus[environment]
-      return cached[:rows] if cached && cached[:stamp] == stamp
-
-      docs = Hash.new { |loaded, module_name| loaded[module_name] = module_docs(environment, module_name) }
-      rows = index(environment)['entities'].map do |entry|
-        [entry, JSON.generate((lookup(docs[entry['module']], entry) || {}).except('source')).downcase]
-      end
-      @corpus[environment] = { stamp: stamp, rows: rows }
-      rows
+      cached = @indexes.delete(environment)
+      cached = nil unless cached && cached[:stamp] == stamp
+      cached ||= { stamp: stamp, index: build_index(environment) }
+      @indexes[environment] = cached
+      @indexes.shift while @indexes.size > @limit
+      cached[:index]
     end
 
-    # How well an entity matches when every word is present: name matches
-    # first, then the summary, then anywhere in its documentation.
-    def rank(entry, body, words)
-      name = entry['name'].downcase
-      summary = entry['summary'].to_s.downcase
-      phrase = words.join(' ')
-      return 0 if [phrase, words.join('::')].include?(name)
-      return 1 if name.start_with?(phrase) || name.end_with?("::#{phrase}")
-      return 2 if words.all? { |w| name.include?(w) }
-      return 3 if words.all? { |w| name.include?(w) || summary.include?(w) }
-
-      4 if words.all? { |w| body.include?(w) }
+    def build_index(environment)
+      docs = Hash.new { |loaded, module_name| loaded[module_name] = module_docs(environment, module_name) }
+      rows = index(environment)['entities'].map do |entry|
+        [entry, SearchIndex.text(lookup(docs[entry['module']], entry) || {})]
+      end
+      SearchIndex.new(rows)
     end
   end
 end

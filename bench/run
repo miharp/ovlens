@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# bench/run [all|setup|generate|mcp|search|clean]
+#
+# Measures ovlens on a synthetic estate: the modules pinned in modules.txt,
+# copied into 30 environments that each drift a little. It runs in a Docker
+# container with a real OpenVox agent, so the numbers reflect a server, and
+# nothing is downloaded onto the host.
+#
+#   setup     start the container and build the estate (about 2 minutes, once)
+#   generate  time ovlens generate: cold, unchanged, after one edit
+#   mcp       time the MCP server's searches and lookups, and its memory
+#   search    score search ranking against queries.yaml; fails below its minimum
+#   all       setup if needed, then generate, mcp and search (the default)
+#   clean     remove the container and everything in it
+#
+# The checkout is measured, through ovlens-dev. Set OVLENS_BENCH_INSTALLED=1 to
+# measure the installed package instead, and OVLENS_BENCH_PACKAGE to choose its
+# version, for example OVLENS_BENCH_PACKAGE=ovlens-0.1.1 to compare with that
+# release. The container is kept between runs; `clean` removes it.
+set -euo pipefail
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+repo=$(dirname "$here")
+name=${OVLENS_BENCH_CONTAINER:-ovlens-bench}
+package=${OVLENS_BENCH_PACKAGE:-ovlens}
+envs=/srv/code/environments
+
+on() { docker exec "$name" "$@"; }
+
+if [ "${OVLENS_BENCH_INSTALLED:-}" = 1 ]; then
+  ovlens=ovlens
+  # A glob, expanded in the container.
+  lib='/opt/ovlens/gems/gems/ovlens-*/lib'
+else
+  ovlens=/bench/ovlens-dev
+  lib=/src/lib
+fi
+
+setup() {
+  if [ "$(docker inspect -f '{{.State.Running}}' "$name" 2> /dev/null)" != true ]; then
+    docker rm -f "$name" > /dev/null 2>&1 || true
+    docker run -d --name "$name" -v "$here:/bench:ro" -v "$repo:/src:ro" almalinux:9 sleep infinity > /dev/null
+  fi
+  # The installed package supplies the agent and, for ovlens-dev, the
+  # dependency gems; the checkout's Gemfile.lock should pin the same ones.
+  on bash -c "set -e
+    if ! rpm -q openvox-agent > /dev/null 2>&1; then
+      dnf -y -q install https://yum.voxpupuli.org/openvox8-release-el-9.noarch.rpm > /dev/null
+      dnf -y -q install openvox-agent python3 time procps-ng findutils > /dev/null
+      curl -fsSL https://packages.harpworks.org/rpm/harpworks.repo -o /etc/yum.repos.d/harpworks.repo
+    fi
+    rpm -q $package > /dev/null 2>&1 || dnf -y -q install $package > /dev/null
+    rpm -q openvox-agent ovlens"
+  on python3 /bench/modules.py fetch /bench/modules.txt /srv/pool
+  on bash -c "set -e
+    if [ ! -d $envs/production ]; then
+      mkdir -p $envs/production/modules
+      cp -a /srv/pool/. $envs/production/modules/
+      printf 'modulepath = modules\n' > $envs/production/environment.conf
+    fi
+    python3 /bench/make_envs.py $envs 29
+    du -sh /srv/code | cut -f1"
+}
+
+generate() {
+  echo "== generate ($ovlens)"
+  on bash /bench/generate.sh "$ovlens" /srv/docs "$envs" | grep -v '^\[error\]'
+}
+
+mcp() {
+  echo "== mcp ($ovlens)"
+  [ -n "$(on ls /srv/docs 2> /dev/null)" ] || on "$ovlens" generate --environmentpath "$envs" --docs-dir /srv/docs --all > /dev/null 2>&1
+  on env OVLENS_CMD="$ovlens" python3 /bench/mcp.py /srv/docs
+}
+
+search() {
+  echo "== search ($ovlens)"
+  on "$ovlens" generate --environmentpath "$envs" --docs-dir /srv/docs-search production > /dev/null 2>&1
+  on bash -c "cd /tmp && /opt/puppetlabs/puppet/bin/ruby -W0 -I $lib /bench/search_eval.rb /srv/docs-search"
+}
+
+case "${1:-all}" in
+  setup) setup ;;
+  generate) generate ;;
+  mcp) mcp ;;
+  search) search ;;
+  all)
+    setup
+    generate
+    mcp
+    search
+    ;;
+  clean) docker rm -f "$name" > /dev/null && echo "removed $name" ;;
+  *) sed -n '2,20p' "$0" >&2; exit 2 ;;
+esac
