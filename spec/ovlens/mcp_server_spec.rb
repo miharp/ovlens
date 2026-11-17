@@ -146,6 +146,64 @@ RSpec.describe Ovlens::McpServer do
     end
   end
 
+  context 'with Hiera data indexed for an environment' do
+    before do
+      write_docs(tmp, 'staging', ntp_module)
+      write_hiera(tmp, 'staging', 'ntp::servers' => ['pool.example.com'], 'ntp::srvers' => ['typo.example.com'])
+    end
+
+    it 'offers three more read-only tools, and says so in its instructions' do
+      tools = server.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' })[:result][:tools]
+      expect(tools.map { |t| t[:name] }.last(3)).to eq(%w[find_hiera_key hiera_for_class check_hiera])
+      expect(tools.map { |t| t[:annotations][:readOnlyHint] }).to all(be(true))
+      request = { jsonrpc: '2.0', id: 1, method: 'initialize',
+                  params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'spec', version: '0' } } }
+      expect(server.handle(request)[:result][:instructions]).to include('find_hiera_key', '<masked>', '<encrypted>')
+    end
+
+    it 'answers from the Hiera data' do
+      data, error = call('find_hiera_key', { key: 'ntp::servers', environment: 'staging' })
+      expect(error).to be(false)
+      expect(data['keys'].first['parameter']).to eq('class' => 'ntp', 'name' => 'servers', 'types' => ['Any'])
+      data, = call('hiera_for_class', { class: 'ntp', environment: 'staging' })
+      expect(data['parameters'].map { |p| p['name'] }).to eq(%w[servers burst])
+      data, = call('check_hiera', { environment: 'staging' })
+      expect(data['unknown_parameters'].map { |o| o['key'] }).to eq(['ntp::srvers'])
+    end
+
+    it 'says how to index an environment without Hiera data' do
+      text, error = call('check_hiera', { environment: 'production' })
+      expect([error, text]).to match([true, /generate --hiera/])
+    end
+
+    it 'cuts the list of places a key is set when they do not fit, and says how many were left out' do
+      write_hiera(tmp, 'staging', {})
+      data = JSON.parse(File.read(File.join(tmp, 'staging', 'hiera.json')))
+      data['keys'] = (1..500).map do |n|
+        { 'key' => 'ntp::servers', 'layer' => 'environment', 'level' => 'Per node',
+          'file' => "data/nodes/node#{n}.example.com.yaml", 'value' => ["ntp#{n}.example.com"] }
+      end
+      File.write(File.join(tmp, 'staging', 'hiera.json'), JSON.generate(data))
+      reply, error = call('find_hiera_key', { key: 'ntp::servers', environment: 'staging' })
+      expect(error).to be(false)
+      expect(JSON.generate(reply).size).to be <= described_class::HieraTool::BUDGET
+      key = reply['keys'].first
+      expect(key['set_in'].size + key['set_in_omitted']).to eq(500)
+      expect(reply['hint']).to include('_omitted')
+    end
+
+    it 'shortens values to keep a reply within its budget' do
+      names = (1..100).map { |n| "setting#{n}" }
+      tags = names.map { |name| { 'tag_name' => 'param', 'name' => name, 'text' => '', 'types' => ['String'] } }
+      write_docs(tmp, 'staging', { 'big' => { 'puppet_classes' => [entity('big', 'Big', tags: tags)] } })
+      write_hiera(tmp, 'staging', names.to_h { |name| ["big::#{name}", 'x' * 450] })
+      data, = call('hiera_for_class', { class: 'big', environment: 'staging' })
+      expect(JSON.generate(data).size).to be <= described_class::HieraTool::BUDGET
+      expect(data['parameters'].first['environment_data'].first['value']).to end_with('... (452 characters)')
+      expect(data['hint']).to be_nil
+    end
+  end
+
   it 'suggests names when nothing matches' do
     data, error = call('get_docs', { name: 'nginx::resource::servr' })
     expect(error).to be(true)

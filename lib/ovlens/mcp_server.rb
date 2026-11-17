@@ -6,6 +6,8 @@ require_relative '../ovlens'
 require_relative 'comparison'
 require_relative 'docs'
 require_relative 'excerpt'
+require_relative 'hiera_index'
+require_relative 'hiera_query'
 
 module Ovlens
   # A read-only MCP server over the generated documentation. It contains no AI
@@ -19,13 +21,28 @@ module Ovlens
                    'functions (file, package, service, exec, user, cron and so on) are not listed here, which does ' \
                    'not mean they are unavailable.'
 
+    HIERA_INSTRUCTIONS = ' Hiera data is indexed too: find_hiera_key shows where a key is set and which class parameter it ' \
+                         'feeds, hiera_for_class shows how each parameter of a class gets its value, and check_hiera ' \
+                         'finds keys for parameters that do not exist. Values are masked: encrypted ones show as ' \
+                         "#{HieraIndex::ENCRYPTED}, and private keys and secrets by name as #{HieraIndex::MASKED}.".freeze
+
+    # The Hiera tools are offered only when some environment's Hiera data has
+    # been indexed, which is opt-in.
     def self.build(docs_dir)
+      docs = Docs.new(docs_dir)
+      hiera = begin
+        docs.hiera_environments.any?
+      rescue Error
+        false
+      end
+      tools = [ListModules, SearchCode, GetDocs, CompareEnvironments]
+      tools += [FindHieraKey, HieraForClass, CheckHiera] if hiera
       MCP::Server.new(
         name: 'ovlens',
         version: VERSION,
-        instructions: INSTRUCTIONS,
-        tools: [ListModules, SearchCode, GetDocs, CompareEnvironments],
-        server_context: { docs: Docs.new(docs_dir) },
+        instructions: hiera ? INSTRUCTIONS + HIERA_INSTRUCTIONS : INSTRUCTIONS,
+        tools: tools,
+        server_context: { docs: docs },
       )
     end
 
@@ -314,6 +331,115 @@ module Ovlens
         end
         report.merge('hint' => 'Some lists were shortened to fit (see the *_omitted counts). Pass `module` to see ' \
                                'one module in full.')
+      end
+    end
+
+    # Shared by the Hiera tools: runs a query, shortening values until the
+    # reply fits.
+    class HieraTool < Tool
+      BUDGET = 40_000
+      ENVIRONMENT_HELP = 'Environment name. Defaults to production.'
+      # The lists a reply may cut short. Values are Hiera data and never cut.
+      LISTS = %w[keys set_in looked_up_in lookup_options parameters module_data environment_data unknown_parameters
+                 files not_indexed errors].freeze
+      CAPS = [50, 20, 10, 5, 2, 1].freeze
+      HINT = 'Lists were cut to fit: each *_omitted count says how many entries were left out. ' \
+             '`ovlens hiera` on the server prints all of them.'
+
+      class << self
+        # Shortens long values first, then the lists, until the reply fits.
+        def answer(docs, environment)
+          environment = docs.resolve(environment)
+          result = nil
+          [HieraQuery::VALUE_LIMIT, 100].each do |limit|
+            result = yield HieraQuery.new(docs, environment, value_limit: limit)
+            return reply(result) if Excerpt.size(result) <= BUDGET
+          end
+          CAPS.each do |cap|
+            short = cut(result, cap)
+            return reply(short.merge('hint' => HINT)) if Excerpt.size(short) <= BUDGET
+          end
+          failure('The answer is too large for one reply; `ovlens hiera` on the server prints all of it.')
+        rescue Error => e
+          failure(e.message)
+        end
+
+        # A copy with at most `cap` entries in each of LISTS, wherever they
+        # are nested, and a "<list>_omitted" count beside each list that was cut.
+        def cut(data, cap)
+          data.each_with_object({}) do |(key, value), short|
+            if LISTS.include?(key) && value.is_a?(Array)
+              short[key] = value.first(cap).map { |item| item.is_a?(Hash) ? cut(item, cap) : item }
+              short["#{key}_omitted"] = value.size - cap if value.size > cap
+            else
+              short[key] = value
+            end
+          end
+        end
+      end
+    end
+
+    # Where a Hiera key is set.
+    class FindHieraKey < HieraTool
+      tool_name 'find_hiera_key'
+      description <<~TEXT
+        Find where a Hiera key is set in an OpenVox environment: every hierarchy level and file, in the environment's
+        data and in module data, with the value, and the class parameter the key feeds through automatic parameter
+        lookup, with its type and default, and the files whose code looks it up by name. Give an exact key such as
+        "ntp::servers", or part of one to list the keys containing it. Values are masked: encrypted ones show as
+        <encrypted>, and private keys and secrets by name as <masked>. This lists every place a key is set; which one a
+        given node gets depends on its facts.
+      TEXT
+      input_schema(
+        properties: {
+          key: { type: 'string', description: 'The key, or part of one.' },
+          environment: { type: 'string', description: ENVIRONMENT_HELP },
+        },
+        required: ['key'],
+      )
+      annotations(**READ_ONLY)
+
+      def self.call(key:, server_context:, **args)
+        answer(server_context[:docs], args[:environment]) { |query| query.find(key) }
+      end
+    end
+
+    # How each parameter of a class gets its value.
+    class HieraForClass < HieraTool
+      tool_name 'hiera_for_class'
+      description <<~TEXT
+        Show how each parameter of a class in an OpenVox environment gets its value: its type, its default in the
+        code, module data that overrides that default, and the environment's Hiera data that sets it, by hierarchy
+        level and file. Parameters with no default and no data are marked: the class cannot be included without a
+        value for them. Also lists keys under the class's name for parameters it does not have.
+      TEXT
+      input_schema(
+        properties: {
+          class: { type: 'string', description: 'Class name, for example "ntp" or "profile::base".' },
+          environment: { type: 'string', description: ENVIRONMENT_HELP },
+        },
+        required: ['class'],
+      )
+      annotations(**READ_ONLY)
+
+      def self.call(server_context:, **args)
+        answer(server_context[:docs], args[:environment]) { |query| query.for_class(args[:class]) }
+      end
+    end
+
+    # Problems in an environment's Hiera data.
+    class CheckHiera < HieraTool
+      tool_name 'check_hiera'
+      description <<~TEXT
+        Check an environment's own Hiera data: keys for class parameters that do not exist (a typo, or data left
+        behind after a parameter was removed; OpenVox ignores these silently), hierarchy levels that could not be
+        indexed, and data files that could not be read. Keys the code reads with lookup() are not reported.
+      TEXT
+      input_schema(properties: { environment: { type: 'string', description: ENVIRONMENT_HELP } })
+      annotations(**READ_ONLY)
+
+      def self.call(server_context:, **args)
+        answer(server_context[:docs], args[:environment], &:check)
       end
     end
   end

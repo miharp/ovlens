@@ -52,6 +52,47 @@ RSpec.describe Ovlens::CLI do
     end
   end
 
+  describe 'hiera' do
+    before do
+      write_docs(tmp, 'production', ntp_module)
+      write_hiera(tmp, 'production', 'ntp::servers' => ['pool.example.com'], 'ntp::srvers' => ['typo.example.com'])
+    end
+
+    def hiera(*args) = run('hiera', '--docs-dir', tmp, *args)
+
+    it 'shows where a key is set and the parameter it feeds' do
+      expect(hiera('key', 'ntp::servers')).to eq(0)
+      expect(out.string).to eq(<<~TEXT)
+        ntp::servers
+          parameter servers of class ntp (Any)
+          environment, Common, data/common.yaml: ["pool.example.com"]
+      TEXT
+    end
+
+    it "shows how a class's parameters get their values" do
+      expect(hiera('class', 'ntp')).to eq(0)
+      expect(out.string).to include("  burst (Any), default false\n", "Keys for parameters the class does not have:\n  ntp::srvers")
+    end
+
+    it 'fails a check that finds a key for a parameter that does not exist' do
+      expect(hiera('check')).to eq(1)
+      expect(out.string).to include('ntp::srvers: ntp has no parameter srvers (data/common.yaml)')
+
+      write_hiera(tmp, 'production', 'ntp::servers' => ['pool.example.com'])
+      out.string = +''
+      expect(hiera('--json', 'check')).to eq(0)
+      expect(JSON.parse(out.string)['unknown_parameters']).to eq([])
+    end
+
+    it 'needs a command, and Hiera data for the environment' do
+      expect(hiera('key')).to eq(2)
+      expect(err.string).to include('key KEY | class NAME | check')
+      write_docs(tmp, 'staging', {})
+      expect(hiera('-e', 'staging', 'check')).to eq(2)
+      expect(err.string).to include('run `ovlens generate --hiera`')
+    end
+  end
+
   it 'prefers an explicit docs directory, then the environment variable' do
     expect(Ovlens.docs_dir('/explicit')).to eq('/explicit')
     stub_const('ENV', ENV.to_h.merge('OVLENS_DOCS_DIR' => '/from/env'))

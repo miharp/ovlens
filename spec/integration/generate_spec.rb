@@ -171,6 +171,64 @@ RSpec.describe 'ovlens generate' do # rubocop:disable RSpec/DescribeClass
     expect(diff.call).to include('  ~ web 1.2.3, code changed (docs changed)', '      + web::extra (class)')
   end
 
+  describe 'with --hiera' do
+    let(:hiera_file) { File.join(docs, 'production', 'hiera.json') }
+
+    def write_file(path, text)
+      file = File.join(envs, 'production', path)
+      FileUtils.mkdir_p(File.dirname(file))
+      File.write(file, text)
+    end
+
+    def hiera(*args)
+      out, _err, status = Open3.capture3(RbConfig.ruby, exe, 'hiera', '--docs-dir', docs, *args)
+      [out, status.exitstatus]
+    end
+
+    before do
+      write_module('production', 'web', body: "# @summary Manages web\n# @param port The port\nclass web (Integer $port = 80) { }\n")
+      write_file('hiera.yaml', <<~YAML)
+        version: 5
+        hierarchy:
+          - name: Per node
+            path: "nodes/%{trusted.certname}.yaml"
+          - name: Common
+            path: common.yaml
+      YAML
+      write_file('data/nodes/web01.example.com.yaml', "web::port: 8443\n")
+      write_file('data/common.yaml', "web::port: 8080\nweb::prot: 8081\nweb::admin_password: hunter2\n")
+      write_file('modules/web/hiera.yaml', "version: 5\nhierarchy: [{ name: Common, path: common.yaml }]\n")
+      write_file('modules/web/data/common.yaml', "web::port: 81\n")
+    end
+
+    it 'indexes Hiera data with secrets masked, keeps it current, and removes it when turned off' do
+      out, err, status = generate('--hiera', 'production')
+      expect([err, status]).to eq(['', 0])
+      expect(out).to include('production: Hiera data: 5 keys in 3 files')
+      expect(File.read(hiera_file)).not_to include('hunter2')
+
+      key, = hiera('key', 'web::port')
+      expect(key).to include('parameter port of class web (Integer), default 80', 'module web, Common, modules/web/data/common.yaml: 81',
+                             'environment, Per node, data/nodes/web01.example.com.yaml: 8443')
+      check, status = hiera('check')
+      expect([check, status]).to match([/web::prot: web has no parameter prot/, 1])
+      request = JSON.generate(jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'check_hiera', arguments: {} })
+      reply, = Open3.capture2(RbConfig.ruby, exe, 'mcp', '--docs-dir', docs, stdin_data: "#{request}\n")
+      orphans = JSON.parse(JSON.parse(reply)['result']['content'].first['text'])['unknown_parameters']
+      expect(orphans.map { |o| o['key'] }).to contain_exactly('web::prot', 'web::admin_password')
+
+      out, = generate('--hiera', 'production')
+      expect(out).to include('production: unchanged', 'production: Hiera data unchanged')
+      write_module('production', 'db', body: "# @summary A database\nclass db { }\n")
+      out, = generate('--hiera', 'production')
+      expect(out).to include('production: 2 modules (1 parsed)', 'production: Hiera data unchanged')
+
+      out, = generate('production')
+      expect(out).to include('production: Hiera data removed')
+      expect(File.exist?(hiera_file)).to be(false)
+    end
+  end
+
   it 'does nothing when given no environments' do
     out, _err, status = generate('')
     expect([out.strip, status]).to eq(['No environments given; nothing to do.', 0])

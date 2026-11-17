@@ -3,6 +3,7 @@
 require 'did_you_mean'
 require 'json'
 require_relative '../ovlens'
+require_relative 'hiera_index'
 require_relative 'search_index'
 
 module Ovlens
@@ -51,6 +52,22 @@ module Ovlens
 
     def index(environment)
       JSON.parse(File.read(File.join(@dir, environment, 'index.json'), encoding: 'UTF-8'))
+    end
+
+    # The environment's Hiera index, written only by `ovlens generate --hiera`.
+    def hiera(environment)
+      file = File.join(@dir, environment, 'hiera.json')
+      raise Error, "Hiera data is not indexed for #{environment}. It is opt-in: run `ovlens generate --hiera`." unless File.file?(file)
+
+      data = JSON.parse(File.read(file, encoding: 'UTF-8'))
+      return data if data['format'] == HieraIndex::FORMAT
+
+      raise Error, "Hiera data for #{environment} was indexed by another version of ovlens. Run `ovlens generate --hiera` again."
+    end
+
+    # The environments with indexed Hiera data.
+    def hiera_environments
+      environments.select { |name| File.file?(File.join(@dir, name, 'hiera.json')) }
     end
 
     # Index entries, optionally narrowed to one kind of entity or one module.

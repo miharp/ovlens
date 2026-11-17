@@ -7,6 +7,8 @@ require 'time'
 require 'tmpdir'
 require_relative '../ovlens'
 require_relative 'fingerprint'
+require_relative 'hiera_index'
+require_relative 'hiera_text'
 require_relative 'index'
 
 module Ovlens
@@ -24,10 +26,18 @@ module Ovlens
     FORMAT = 1
     YARD_ARGS = %w[--no-save --no-stats --no-yardopts --no-document --quiet].freeze
 
-    def initialize(docs_dir:, environmentpath: nil, force: false, out: $stdout, err: $stderr)
+    # `hiera` indexes each environment's Hiera data as well, masking values
+    # whose names match `hiera_masks`. It is off by default; a run without it
+    # removes Hiera data an earlier run indexed.
+    def initialize(docs_dir:, environmentpath: nil, force: false, hiera: false, hiera_masks: HieraIndex::DEFAULT_MASKS,
+                   out: $stdout, err: $stderr)
       @docs_dir = docs_dir
       @environmentpath = environmentpath
       @force = force
+      @hiera = hiera
+      @hiera_masks = hiera_masks
+      # Lookups found in a module's code, by fingerprint, for every environment.
+      @lookup_cache = {}
       @out = out
       @err = err
     end
@@ -76,11 +86,51 @@ module Ovlens
 
       previous = @force ? nil : read_index(File.join(@docs_dir, name, 'index.json'))
       modules = fingerprints(env, previous)
-      if previous && unchanged?(previous, modules)
-        @out.puts "#{name}: unchanged"
-        return true
+      documented = if previous && unchanged?(previous, modules)
+                     @out.puts "#{name}: unchanged"
+                     true
+                   else
+                     write(name, modules)
+                   end
+      hiera = @hiera ? write_hiera(name, modules) : remove_hiera(name)
+      documented && hiera
+    end
+
+    # Writes <docs>/<environment>/hiera.json, unless it would not change.
+    def write_hiera(name, modules)
+      root = Puppet.lookup(:environments).get_conf(name).path_to_env
+      file = File.join(@docs_dir, name, 'hiera.json')
+      previous = read_index(file)
+      listed = modules.map { |mod, print| [mod.name, mod.path, print] }
+      index = HieraIndex.new(name, root, listed, masks: @hiera_masks, previous: previous, cache: @lookup_cache).build
+      fresh = JSON.parse(JSON.generate(index))
+      unless previous&.except('generated_at') == fresh
+        temporary = "#{file}.#{Process.pid}.tmp"
+        File.write(temporary, "#{JSON.pretty_generate(fresh.merge('generated_at' => Time.now.utc.iso8601))}\n")
+        File.rename(temporary, file)
       end
-      write(name, modules)
+      # `scanned` only records which modules' code was read for lookups.
+      if previous&.except('generated_at', 'scanned') == fresh.except('scanned')
+        @out.puts "#{name}: Hiera data unchanged"
+      else
+        files = fresh['layers'].sum { |layer| layer['levels'].sum { |level| Array(level['files']).size } }
+        @out.puts "#{name}: Hiera data: #{HieraText.count(fresh['keys'].size, 'key')} in #{HieraText.count(files, 'file')}"
+      end
+      index['errors'].each { |error| @err.puts "#{name}: Hiera file #{error['file']}: #{error['error']}" }
+      index['errors'].empty?
+    rescue StandardError => e
+      # Not the message, which can quote the data.
+      @err.puts "#{name}: Hiera data not indexed: #{e.class} at #{e.backtrace&.first}"
+      false
+    end
+
+    def remove_hiera(name)
+      file = File.join(@docs_dir, name, 'hiera.json')
+      if File.exist?(file)
+        File.delete(file)
+        @out.puts "#{name}: Hiera data removed (run with --hiera to keep it)"
+      end
+      true
     end
 
     # [module, fingerprint, stat key] for each module of the environment. A
@@ -187,6 +237,9 @@ module Ovlens
       end
 
       File.write(File.join(staging, 'index.json'), "#{JSON.pretty_generate(index(name, listing, entities))}\n")
+      # Keep the Hiera index readable until the Hiera step replaces or removes it.
+      hiera = File.join(final, 'hiera.json')
+      FileUtils.cp(hiera, staging, preserve: true) if File.file?(hiera)
       FileUtils.chmod(0o755, staging)
       swap(staging, final)
       @out.puts "#{name}: #{listing.size} modules (#{parsed} parsed), #{entities.size} entities -> #{final}"
