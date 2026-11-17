@@ -239,6 +239,12 @@ environments (3.7 GB of code, in a container with openvox-agent 8.33.0;
 | Search, first in an environment | 0.25 s | 0.7 s |
 | Judged queries with a wanted entity in the top 3 | 23 of 40 | 28 of 40 |
 
+These were measured on a 10-CPU Arm Mac. On a 4-CPU x86 GitHub runner, where
+the weekly Benchmark workflow runs, the disk, memory and ranking results are
+the same and unchanged runs are about a third faster, but a cold run takes as
+long as with 0.1.1, about a minute: there the time goes to parsing, not to
+writing copies.
+
 Most of the queries 0.2.0 still misses ask in other words than the docs use,
 such as "kernel parameter" for `sysctl`.
 
