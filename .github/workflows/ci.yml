@@ -44,7 +44,7 @@ jobs:
           ruby-version: '3.2'
           bundler-cache: true
       # The modules pinned in bench/modules.txt, 128 MB, fetched once per list.
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: ~/ovlens-search-check/pool
           key: bench-modules-${{ hashFiles('bench/modules.txt') }}
